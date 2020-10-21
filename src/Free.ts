@@ -1,3 +1,5 @@
+import { Any } from 'ts-toolbelt';
+
 export const FREE_URI = 'Free';
 
 export type FREE_URI = typeof FREE_URI;
@@ -21,23 +23,29 @@ export abstract class Free<Eff = any, A = any> {
 
   map<B>(mapper: (value: A) => B): Free<Eff, B> {
     // return new Return_(mapper(value))
-    return this.chain((a) => new Pure(mapper(a))) as any;
+    return this.chain((a) => new Pure(mapper(a)));
   }
 
-  handle<HandledEff>(
-    ...handlers: Handler<HandledEff, Eff>[]
-  ): Free<Exclude<Eff, HandledEff>, A> {
-    // Free<Remove<Eff, HandledEff>, A>
-    if (isChained(this)) {
-      for (const handler of handlers) {
-        if (this.effRepr.symbol === handler.symbol) {
-          const result = handler(this.effRepr.args as any, undefined as any);
-          return this.next(result);
-        }
-      }
-    }
-    return this as any;
-  }
+  // handleTest<R>(handler: (resume: (val: A) => this) => R): R {
+  //   return handler();
+  // }
+
+  // handle<HandledEff>(
+  //   ...handlers: Handler<HandledEff, Eff>[]
+  // ): Free<Exclude<Eff, HandledEff>, A> {
+  //   // Free<Remove<Eff, HandledEff>, A>
+  //   if (isChained(this)) {
+  //     for (const handler of handlers) {
+  //       if (this.effRepr.symbol === handler.symbol) {
+  //         const result = handler(this.effRepr.args as any, undefined as any);
+  //         return this.next(result);
+  //       }
+  //     }
+  //   }
+  //   return this as any;
+  // }
+
+  
   //   abstract map<B>(mapper: (value: A) => B): Free<Eff, B>
 }
 
@@ -75,12 +83,6 @@ interface pure {
 interface impure {
   readonly impure: unique symbol;
 }
-// export class Impure<Eff = impure, A = any> extends Free<Eff, A> {
-//     chain<B, Eff2>(chainer: (value: A) => Free<Eff2, B>): Free<Eff & Eff2, B> {
-//         throw new Error('Method not implemented.')
-//     }
-
-// }
 export class Pure<Eff = pure, A = any> extends Free<Eff, A> {
   constructor(public value: A) {
     super();
@@ -89,10 +91,15 @@ export class Pure<Eff = pure, A = any> extends Free<Eff, A> {
   chain<B, Eff2>(chainer: (value: A) => Free<Eff2, B>): Free<Eff | Eff2, B> {
     return chainer(this.value);
   }
+}
+export class Suspend<Eff = pure, A = any> extends Free<Eff, A> {
+  constructor(public effRepr: EffectRepresentation) {
+    super();
+  }
 
-  //   map<B>(mapper: (value: A) => B): Free<any, B> {
-  //     return new Of(mapper(this.value))
-  //   }
+  chain<B, Eff2>(chainer: (value: A) => Free<Eff2, B>): Free<Eff | Eff2, B> {
+    return new Chained(this.effRepr, chainer);
+  }
 }
 interface EffectRepresentation<Args extends any[] = any[]> {
   symbol: symbol;
@@ -162,17 +169,36 @@ export const toFree = <
   Fn extends (...args: any) => any = Eff[Prop],
   Args extends any[] = Parameters<Fn>,
   Return = ReturnType<Fn>
->(): [(...args: Args) => Free<Eff, Return>, IsEffect<Eff, Prop>] => {
+>(): [
+  (...args: Args) => Free<Eff, Return>,
+  IsEffect<Eff, Prop>,
+  <T>( // cast because this fn will only trigger if there is a State effect in it
+    handler: (...args: Args) => Return,
+  ) => ((args: any[], eff: T) => Return) & {
+    symbol: symbol;
+    remove: Eff;
+  },
+] => {
   const symbol = Symbol();
   return [
     // (...args) => new Chained({ symbol, args }, (args) => new Pure(args)),
-    (...args) =>
-      new Chained<Eff, Return>(
-        { symbol, args },
-        (e) => new Pure<Eff, Return>(e),
-      ),
+    (...args) => new Suspend<Eff, Return>({ symbol, args }),
+    // new Chained<Eff, Return>(
+    //   { symbol, args },
+    //   (e) => new Pure<Eff, Return>(e),
+    // ),
     (val): val is any =>
       val instanceof Chained && val.effRepr.symbol === symbol,
+    (handler) =>
+      Object.assign(
+        (args: any[]) => {
+          return handler(...(args as Args));
+        },
+        ({ symbol } as any) as {
+          symbol: symbol;
+          remove: Eff;
+        },
+      ),
   ];
 };
 
