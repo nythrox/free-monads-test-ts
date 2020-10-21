@@ -45,7 +45,6 @@ export abstract class Free<Eff = any, A = any> {
   //   return this as any;
   // }
 
-  
   //   abstract map<B>(mapper: (value: A) => B): Free<Eff, B>
 }
 
@@ -101,9 +100,8 @@ export class Suspend<Eff = pure, A = any> extends Free<Eff, A> {
     return new Chained(this.effRepr, chainer);
   }
 }
-interface EffectRepresentation<Args extends any[] = any[]> {
-  symbol: symbol;
-  args: Args;
+class EffectRepresentation<Args extends any[] = any[]> {
+  constructor(public symbol: symbol, public args: Args) {}
 }
 
 export class Chained<Eff = any, A = any, B = any> extends Free<Eff, B> {
@@ -182,7 +180,8 @@ export const toFree = <
   const symbol = Symbol();
   return [
     // (...args) => new Chained({ symbol, args }, (args) => new Pure(args)),
-    (...args) => new Suspend<Eff, Return>({ symbol, args }),
+    (...args) =>
+      new Suspend<Eff, Return>(new EffectRepresentation(symbol, args)),
     // new Chained<Eff, Return>(
     //   { symbol, args },
     //   (e) => new Pure<Eff, Return>(e),
