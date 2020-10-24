@@ -55,6 +55,7 @@ export abstract class Free<Eff = any, A = any> {
 //   }) as Handler<>
 // export const handleExn = <T, R>(handler: (err: T) => R) =>
 //   Object.assign((err: T) => handler(err), { symbol: ExnS }) as any
+
 export type Handler<T, Eff> = {
   remove: T;
   symbol: symbol;
@@ -123,8 +124,8 @@ export class Chained<Eff = any, A = any, B = any> extends Free<Eff, B> {
   //     // return this.prev.chain(this.next).map(mapper)
   //   }
 }
-export const pure = <Eff, A = any>(value: A) =>
-  (new Pure(value) as any) as Free<Eff, A>;
+// export const pure = <Eff, A = any>(value: A) =>
+//   (new Pure(value) as any) as Free<Eff, A>;
 
 // export const chain = <A, Eff extends Effect, Fn extends EffectCall<any>, B>(
 //   free: Fn,
