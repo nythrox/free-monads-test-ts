@@ -107,28 +107,22 @@ type CalculateGN<Gen extends GEN, Removed> = Gen extends GEN<infer A, infer B>
   ? GEN<Remove<A, Removed>, B>
   : never;
 export type GEN<E = any, R = any> = Generator<E, R, any> & EffFn;
-export function withHandler<RemoveEnv>(): <
-  G extends GEN,
-  ER extends [any, any] = G extends GEN<infer E, infer R> ? [E, R] : never
->(
+export function withHandler<G extends GEN, RemoveEnv>(
   gen: G,
-  handler: Handler<ER[1]>,
-) => GEN<Remove<ER[0], RemoveEnv>, ER[1]>;
-export function withHandler() {
-  return (gen: any, handler: any) => {
-    function* withHandlerFrame(): GEN {
-      const result = yield gen;
-      // eventually handles the return value
-      if (handler.return != null) {
-        return yield handler.return(result);
-      }
-      return result;
+  handler: Handler<any>,
+): CalculateGN<G, RemoveEnv> {
+  function* withHandlerFrame(): GEN {
+    const result = yield gen;
+    // eventually handles the return value
+    if (handler.return != null) {
+      return yield handler.return(result);
     }
+    return result;
+  }
 
-    const withHandlerGen = withHandlerFrame();
-    withHandlerGen._handler = handler;
-    return toGenStar(withHandlerGen as any) as any;
-  };
+  const withHandlerGen = withHandlerFrame();
+  withHandlerGen._handler = handler;
+  return toGenStar(withHandlerGen as any) as any;
 }
 
 function performOp(type: string, data: any, performGen: GEN) {

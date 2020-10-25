@@ -23,7 +23,7 @@ interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
 
   
  
-    note: there is ways to discover the extra env being added, but not ways to discover whats being removed (UNLESS you get it by the key 'wait', but that would be general)
+    note: there is ways to discover the extra env being added, but not ways to discover whats being removed
  
  */
 
@@ -66,7 +66,7 @@ function* mainWait() {
   yield* log('stated waiting...');
   yield* wait(500);
   yield* log('finished waiting');
-  const res = state('not_jason', mainState());
+  const res = yield* state('not_jason', mainState());
   yield* log('res: ', res);
   return 10;
 }
@@ -91,26 +91,27 @@ describe('Effects', () => {
   });
 });
 
-const res = state('not_jason', mainState());
 export function state<G extends GEN, T>(value: T, comp: G) {
   let val = value;
-  return withHandler<StateGet<T> | StateSet<T>>()(comp,{
+  return withHandler<G, StateGet<T> | StateSet<T>>(comp, {
     //   *return(val) {
     //     return val;
     //   },
     *state(data: { method: 'get' } | { method: 'set'; value: T }, cont) {
       if (data.method === 'get') {
         return yield* cont(val);
-      } else {
-        val = data.value;
-        return yield* cont(undefined);
       }
+      // else if (data.method == 'set') {
+      // else {
+      val = data.value;
+      return yield* cont(undefined);
+      // }
     },
-  })
+  });
 }
 
 export function withLog<G extends GEN>(comp: G) {
-  return withHandler<Log>()(comp, {
+  return withHandler<G, Log>(comp, {
     //   *return(val) {
     //     return val;
     //   },
@@ -121,9 +122,8 @@ export function withLog<G extends GEN>(comp: G) {
     },
   });
 }
-
 export type Remove<T, RemoveValue> = T extends RemoveValue
-  ? never // ran out of effects
+  ? never
   : T extends infer U | RemoveValue
   ? U
   : never;
@@ -132,7 +132,7 @@ export function withWait<G extends GEN, Milliseconds extends number>(
   //   comp: GEN<Wait<Milliseconds> | E, R>,
   comp: G,
 ) {
-  return withHandler<Wait<Milliseconds>>()(comp, {
+  return withHandler<G, Wait<Milliseconds>>(comp, {
     //   *return(val) {
     //     return val;
     //   },
