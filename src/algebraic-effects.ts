@@ -1,4 +1,4 @@
-import { Remove } from "./effects.test";
+import { Remove } from './effects.test';
 
 function isGenerator(x: any): x is GEN {
   return x != null && typeof x.next === 'function';
@@ -103,14 +103,14 @@ interface EffFn {
 // ) {
 
 // }
-
+type CalculateGN<Gen extends GEN, Removed> = Gen extends GEN<infer A, infer B>
+  ? GEN<Remove<A, Removed>, B>
+  : never;
 export type GEN<E = any, R = any> = Generator<E, R, any> & EffFn;
-export function withHandler<
-  InitialEnv,
-  RemovedEnv,
-  R,
-  FinalEnv = Remove<InitialEnv, RemovedEnv>
->(handler: Handler<R>, gen: GEN<any, any>): GEN<FinalEnv, R> {
+export function withHandler<G extends GEN, RemoveEnv>(
+  gen: G,
+  handler: Handler<any>,
+): CalculateGN<G, RemoveEnv> {
   function* withHandlerFrame(): GEN {
     const result = yield gen;
     // eventually handles the return value
@@ -122,7 +122,7 @@ export function withHandler<
 
   const withHandlerGen = withHandlerFrame();
   withHandlerGen._handler = handler;
-  return toGenStar<FinalEnv, R>(withHandlerGen as any);
+  return toGenStar(withHandlerGen as any) as any;
 }
 
 function performOp(type: string, data: any, performGen: GEN) {

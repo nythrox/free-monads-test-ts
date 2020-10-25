@@ -11,6 +11,7 @@ interface Log extends OP<void, 'log', { args: any[]; method: 'log' }> {}
 interface StateGet<T> extends OP<T, 'state', { method: 'get' }> {}
 interface StateSet<T> extends OP<void, 'state', { value: T; method: 'set' }> {}
 interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
+interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
 
 // todo:
 /**
@@ -90,42 +91,36 @@ describe('Effects', () => {
   });
 });
 
-export function state<T, E, R>(value: T, comp: GEN<E, R>) {
+export function state<G extends GEN, T>(value: T, comp: G) {
   let val = value;
-  return withHandler<E, StateGet<T> | StateSet<T>, R>(
-    {
-      //   *return(val) {
-      //     return val;
-      //   },
-      *state(data: { method: 'get' } | { method: 'set'; value: T }, cont) {
-        if (data.method === 'get') {
-          return yield* cont(val);
-        }
-        // else if (data.method == 'set') {
-        // else {
-        val = data.value;
-        return yield* cont(undefined);
-        // }
-      },
+  return withHandler<G, StateGet<T> | StateSet<T>>(comp, {
+    //   *return(val) {
+    //     return val;
+    //   },
+    *state(data: { method: 'get' } | { method: 'set'; value: T }, cont) {
+      if (data.method === 'get') {
+        return yield* cont(val);
+      }
+      // else if (data.method == 'set') {
+      // else {
+      val = data.value;
+      return yield* cont(undefined);
+      // }
     },
-    comp,
-  );
+  });
 }
 
-export function withLog<E, R>(comp: GEN<E, R>) {
-  return withHandler<E, Log, R>(
-    {
-      //   *return(val) {
-      //     return val;
-      //   },
-      *log(data: { args: any[]; method: 'log' }, cont) {
-        console.log(...data.args);
-        const res = yield* cont(undefined);
-        return res;
-      },
+export function withLog<G extends GEN>(comp: G) {
+  return withHandler<G, Log>(comp, {
+    //   *return(val) {
+    //     return val;
+    //   },
+    *log(data: { args: any[]; method: 'log' }, cont) {
+      console.log(...data.args);
+      const res = yield* cont(undefined);
+      return res;
     },
-    comp,
-  );
+  });
 }
 export type Remove<T, RemoveValue> = T extends RemoveValue
   ? never
@@ -133,22 +128,19 @@ export type Remove<T, RemoveValue> = T extends RemoveValue
   ? U
   : never;
 
-export function withWait<E, Milliseconds extends number, R>(
+export function withWait<G extends GEN, Milliseconds extends number>(
   //   comp: GEN<Wait<Milliseconds> | E, R>,
-  comp: GEN<E, R>,
+  comp: G,
 ) {
-  return withHandler<E, Wait<Milliseconds>, R>(
-    {
-      //   *return(val) {
-      //     return val;
-      //   },
-      *wait(data: { milliseconds: number }, cont) {
-        yield* toGenStar((parent: GEN) => {
-          setTimeout(() => resume(parent), data.milliseconds);
-        });
-        return yield* cont();
-      },
+  return withHandler<G, Wait<Milliseconds>>(comp, {
+    //   *return(val) {
+    //     return val;
+    //   },
+    *wait(data: { milliseconds: number }, cont) {
+      yield* toGenStar((parent: GEN) => {
+        setTimeout(() => resume(parent), data.milliseconds);
+      });
+      return yield* cont();
     },
-    comp,
-  );
+  });
 }
