@@ -24,9 +24,9 @@ describe('generator cps gen test', () => {
   //       expect(d).toEqual([null, 'hi', 10]);
   //     });
   //   });
-  test('abort test', () => {
-    run(start(main2), console.log);
-  });
+  // test('abort test', () => {
+  //   run(start(main2), console.log);
+  // });
 });
 
 function* start<R>(genFunc: (abort: Resume) => Generator<Resume, R, any>) {
