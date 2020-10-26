@@ -77,7 +77,7 @@ function resumeGenerator(gen: GEN, arg: any, value?: any, done?: true) {
   }
 }
 
-export function start<T>(gen: GEN, onDone: (val: T) => void) {
+export function start<R>(gen: GEN<never,R>, onDone: (val: R) => void) {
   gen._return = onDone;
   resumeGenerator(gen, null);
 }

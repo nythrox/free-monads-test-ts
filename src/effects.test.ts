@@ -11,7 +11,7 @@ interface Log extends OP<void, 'log', { args: any[]; method: 'log' }> {}
 interface StateGet<T> extends OP<T, 'state', { method: 'get' }> {}
 interface StateSet<T> extends OP<void, 'state', { value: T; method: 'set' }> {}
 interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
-interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
+interface Async<T> extends OP<T, 'resolve', { promise: Promise<T> }> {}
 
 // todo:
 /**
@@ -40,6 +40,10 @@ export function wait<T extends number>(milliseconds: T) {
   return op<Wait<T>>('wait', { milliseconds });
 }
 
+export function resolve<T>(promise: Promise<T>) {
+  return op<Async<T>>('resolve', { promise });
+}
+
 function* main() {
   yield* printABC();
   yield* log('Bye');
@@ -62,13 +66,16 @@ function* mainState() {
   return newname;
 }
 
+const numberPromise = Promise.resolve(10);
+
 function* mainWait() {
   yield* log('stated waiting...');
   yield* wait(500);
   yield* log('finished waiting');
   const res = yield* state('not_jason', mainState());
   yield* log('res: ', res);
-  return 10;
+  const number = yield* resolve(numberPromise);
+  return 10 + number;
 }
 describe('Effects', () => {
   //   it('should work', () => {
@@ -84,7 +91,8 @@ describe('Effects', () => {
   it('should wait 500 milliseconds before printing', (finish) => {
     const programWaitHandled = withWait(mainWait());
     const programLogHandled = withLog(programWaitHandled);
-    start(programLogHandled, (done) => {
+    const programAsyncHandled = async(programLogHandled);
+    start(programAsyncHandled, (done) => {
       console.log('done: ', done);
       finish();
     });
@@ -101,11 +109,8 @@ export function state<G extends GEN, T>(value: T, comp: G) {
       if (data.method === 'get') {
         return yield* cont(val);
       }
-      // else if (data.method == 'set') {
-      // else {
       val = data.value;
-      return yield* cont(undefined);
-      // }
+      return yield* cont();
     },
   });
 }
@@ -117,7 +122,7 @@ export function withLog<G extends GEN>(comp: G) {
     //   },
     *log(data: { args: any[]; method: 'log' }, cont) {
       console.log(...data.args);
-      const res = yield* cont(undefined);
+      const res = yield* cont();
       return res;
     },
   });
@@ -144,3 +149,17 @@ export function withWait<G extends GEN, Milliseconds extends number>(
     },
   });
 }
+
+export function async<G extends GEN, V>(comp: G) {
+  return withHandler<G, Async<V>>(comp, {
+    *resolve(data: { promise: Promise<V> }, cont) {
+      yield (parent: GEN) => {
+        data.promise.then((val) => {
+          resume(parent, val);
+        });
+      };
+      return yield* cont();
+    },
+  });
+}
+  
