@@ -11,7 +11,8 @@ interface Log extends OP<void, 'log', { args: any[]; method: 'log' }> {}
 interface StateGet<T> extends OP<T, 'state', { method: 'get' }> {}
 interface StateSet<T> extends OP<void, 'state', { value: T; method: 'set' }> {}
 interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
-interface Async<T> extends OP<T, 'resolve', { promise: Promise<T> }> {}
+interface Async extends OP<any, 'resolve', { promise: Promise<any> }> {}
+interface Amb extends OP<any, 'list', { list: Amb }> {}
 
 // todo:
 /**
@@ -162,4 +163,31 @@ export function async<G extends GEN, V>(comp: G) {
     },
   });
 }
-  
+
+const movies = function* () {
+  const page = yield* List(1, 2, 3, 4, 5);
+  const movies = yield* TMBDAPI.discover({
+    sorting: 'popularity-desc',
+    page: page,
+    releasedBefore: '15126123',
+  });
+  const movie = yield* movies;
+  const credits = yield* TMBDAPI.movieCredits(movie.id);
+  const actors = yield* TMBDAPI.person((yield* credits).id);
+  return { movie, credits, actors };
+};
+
+type Movie = {
+  id: string;
+};
+type Credits = {
+  id: string;
+};
+type Person = {};
+type List<T> = Generator<Amb, T, any>;
+declare function List<T extends any[]>(...args: T): List<T[number]>;
+declare const TMBDAPI: {
+  discover: (args: any) => Generator<Async, List<Movie>>;
+  movieCredits: (arg: any) => Generator<Async, List<Credits>>;
+  person: (arg: any) => Generator<Async, Person, any>;
+};

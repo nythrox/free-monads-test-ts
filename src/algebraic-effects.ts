@@ -41,9 +41,9 @@ export function* toGenStar<T, R>(valueToYield: T): Generator<T, R, any> {
 export function resume(gen: GEN, arg?: any) {
   return resumeGenerator(gen, arg, null);
 }
-function resumeGenerator(gen: GEN, arg: any, value?: any, done?: true) {
+function resumeGenerator(gen: GEN, next: any, value?: any, done?: true) {
   if (done === undefined)
-    ({ value, done } = gen.next(arg) as { value: any; done?: true });
+    ({ value, done } = gen.next(next) as { value: any; done?: true });
 
   if (done) {
     const _return = gen._return;
