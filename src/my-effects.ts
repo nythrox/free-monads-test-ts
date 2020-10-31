@@ -55,7 +55,3 @@ export const run = <_E, R>(
 
 
 
-
-Promise.resolve(10).then((res) => {
-    
-})

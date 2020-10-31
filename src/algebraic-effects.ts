@@ -77,15 +77,22 @@ function resumeGenerator(gen: GEN, next: any, value?: any, done?: true) {
   }
 }
 
-export function start<R>(gen: GEN<never,R>, onDone: (val: R) => void) {
+export function start<R>(gen: GEN<never, R>, onDone: (val: R) => void) {
   gen._return = onDone;
   resumeGenerator(gen, null);
 }
-export interface Handler<R = any> {
+// export interface Handler<R = any> {
+//   // ExtraEnv = any,  TODO: missing extra env from inside the handlers
+//   return?: (val: any) => GEN<any, R>;
+//   [P: string]: HandlerFn<any, R> | undefined;
+// }
+interface Ret<R> {
   // ExtraEnv = any,  TODO: missing extra env from inside the handlers
   return?: (val: any) => GEN<any, R>;
-  [P: string]: HandlerFn<any, R> | undefined;
 }
+export interface Handler<R = any>
+  extends Record<string, HandlerFn<any, R> | undefined>,
+    Ret<R> {}
 export type HandlerFn<ExtraEnv = any, R = any> = {
   (val: any, resume: (value?: any) => Generator<any, R, any>): GEN<ExtraEnv, R>;
 };

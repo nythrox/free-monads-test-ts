@@ -11,7 +11,7 @@ interface Log extends OP<void, 'log', { args: any[]; method: 'log' }> {}
 interface StateGet<T> extends OP<T, 'state', { method: 'get' }> {}
 interface StateSet<T> extends OP<void, 'state', { value: T; method: 'set' }> {}
 interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
-interface Async extends OP<any, 'resolve', { promise: Promise<any> }> {}
+interface Async<T> extends OP<T, 'resolve', { promise: Promise<T> }> {}
 interface Amb extends OP<any, 'list', { list: Amb }> {}
 
 // todo:
@@ -78,6 +78,40 @@ function* mainWait() {
   const number = yield* resolve(numberPromise);
   return 10 + number;
 }
+function* logTest() {
+  yield* log('A');
+  yield* log('B');
+  yield* log('C');
+}
+function* test2() {
+  // yield* perform("exn", "Nooo!");
+  const plusOne = yield* op('plusOne', 1);
+  const p12 = yield* op('plusOne', 2);
+  const p23 = yield* op('plusOne', 3);
+  return 'plusOne: ' + plusOne + p12 + p23;
+}
+
+function* test() {
+  // const msg = yield* perform("name", "world");
+  const number = yield* withHandler(test2(), {
+    *plusOne(num, k) {
+      const name = yield* op('name', 'world');
+      const res = yield* k(num + 1);
+      return res + name;
+    },
+  });
+  return number;
+}
+
+function* hello() {
+  const res2 = yield* withHandler(test(), {
+    *name(name, k) {
+      const res = yield* k('Hello ' + name);
+      return res;
+    },
+  });
+  return res2;
+}
 describe('Effects', () => {
   //   it('should work', () => {
   //     start(withLog(main()), (val) => {
@@ -89,13 +123,31 @@ describe('Effects', () => {
   //       console.log('done:', done),
   //     );
   //   });
-  it('should wait 500 milliseconds before printing', (finish) => {
-    const programWaitHandled = withWait(mainWait());
-    const programLogHandled = withLog(programWaitHandled);
-    const programAsyncHandled = async(programLogHandled);
-    start(programAsyncHandled, (done) => {
-      console.log('done: ', done);
-      finish();
+  // it('should wait 500 milliseconds before printing', (finish) => {
+  //   const programWaitHandled = withWait(mainWait());
+  //   const programLogHandled = withLog(programWaitHandled);
+  //   const programAsyncHandled = async(programLogHandled);
+  //   start(programAsyncHandled, (done) => {
+  //     console.log('done: ', done);
+  //     finish();
+  //   });
+  // });
+  // it('should log reversed', () => {
+  //   const program = logTest();
+  //   const programLogHandled = withHandler(program, {
+  //     *log(data: { args: any[]; method: 'log' }, cont) {
+  //       const res = yield* cont();
+  //       console.log(...data.args);
+  //       // return res;
+  //     },
+  //   });
+  //   start(programLogHandled, () => {});
+  // });
+  it('should concat the msgs', () => {
+    const program = hello();
+    start(program, (res) => {
+      expect(res).toBe('plusOne: 234Hello worldHello worldHello world');
+      console.log(res);
     });
   });
 });
@@ -187,7 +239,7 @@ type Person = {};
 type List<T> = Generator<Amb, T, any>;
 declare function List<T extends any[]>(...args: T): List<T[number]>;
 declare const TMBDAPI: {
-  discover: (args: any) => Generator<Async, List<Movie>>;
-  movieCredits: (arg: any) => Generator<Async, List<Credits>>;
-  person: (arg: any) => Generator<Async, Person, any>;
+  discover: (args: any) => Generator<Async<List<Movie>>, List<Movie>>;
+  movieCredits: (arg: any) => Generator<Async<List<Credits>>, List<Credits>>;
+  person: (arg: any) => Generator<Async<Person>, Person, any>;
 };
