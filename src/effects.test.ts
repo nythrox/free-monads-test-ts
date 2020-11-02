@@ -11,7 +11,9 @@ interface Log extends OP<void, 'log', { args: any[]; method: 'log' }> {}
 interface StateGet<T> extends OP<T, 'state', { method: 'get' }> {}
 interface StateSet<T> extends OP<void, 'state', { value: T; method: 'set' }> {}
 interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
+
 interface Async<T> extends OP<T, 'resolve', { promise: Promise<T> }> {}
+
 interface Amb extends OP<any, 'list', { list: Amb }> {}
 
 // todo:

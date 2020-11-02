@@ -1,7 +1,12 @@
-// function isGenerator(x) {
-//   return x != null && typeof x.next === "function";
-// }
+const nextImmutable = (regen, ...args) => (data) => {
+  const gen = regen(...args);
+  return gen.next(data), gen;
+};
+
 let debug = false;
+let handlers = Object.create(null);
+let returnToDelimitedContinuation = null;
+
 function runGenerator(gen, arg, then) {
   const { value, done } = gen.next(arg);
 
@@ -14,7 +19,7 @@ function runGenerator(gen, arg, then) {
       value(gen, then);
       return;
     }
-    throw new Error("yielded invalid value");
+    throw new Error("yielded invalid value: " + value.toString());
   }
 }
 function resume(gen, val, then) {
@@ -24,82 +29,72 @@ function start(gen, onDone) {
   // gen._return = onDone;
   runGenerator(gen, null, onDone);
 }
-function copyTo(copyElements, toObj) {
-  for (const p in copyElements) {
-    toObj[p] = copyElements[p];
-  }
-}
-function addNext(handlers, then, lastHandlers) {
+function addScopeInfo(handlers) {
   for (const p in handlers) {
-    const prev = handlers[p];
-
-    handlers[p] = function (...args) {
-      const gen = prev(...args);
-      gen._handlers = lastHandlers;
-      return gen;
-      // return res;
-    };
-
-    handlers[p]._then = then;
+    console.log("setting", p, "to", handlers);
+    handlers[p].handlerScope = handlers;
   }
 }
-function* handle(fn, handlers) {
+
+function* handleMulti(fn, newHandlers) {}
+
+function* handle(fn, newHandlers) {
   return yield (lastGen, lastThen) => {
-    const lastHandlers = lastGen._handlers;
     const thisThen = (res) => {
       resume(lastGen, res, lastThen);
     };
+    const currHandlers = handlers;
+    handlers = Object.assign(Object.create(handlers), newHandlers);
+    // Object.setPrototypeOf(newHandlers, handlers);
+    // handlers = newHandlers;
     const subGen = (function* () {
+      returnToDelimitedContinuation = thisThen;
       const g = typeof fn === "function" ? fn() : fn;
-      const result = yield* g;
-      if (handlers.return != null) {
-        const returnGen = handlers.return(result);
-        returnGen._handlers = lastHandlers;
-        return yield (r, t) => {
-          resume(returnGen, result, (val) => {
-            resume(r, val, t);
-          });
-        };
+      let result = yield* g;
+      handlers = currHandlers;
+      if (newHandlers.return) {
+        const returnGen = newHandlers.return(result);
+        result = yield* returnGen;
       }
       return result;
     })();
-    addNext(handlers, thisThen, lastHandlers, lastThen);
-    if (lastHandlers) {
-      // Object.setPrototypeOf(handlers, lastHandlers);
-      subGen._handlers = Object.assign(Object.create(lastHandlers), handlers);
-    } else subGen._handlers = handlers;
+    addScopeInfo(handlers);
     start(subGen, thisThen);
   };
 }
-
-function* perform(name, values) {
-  if (debug)
+function debugPerform(name, values) {
+  if (debug) {
     console.log(
       `perform: (${name}, ${
         typeof values === "string" ? `"${values}"` : values
       })`
     );
+    console.log("handlers", handlers);
+  }
+}
+function* perform(name, values) {
+  debugPerform(name, values);
   // curr gen is only used to get the handlers and _then
+  const currHandlers = handlers;
+  const handler = currHandlers[name];
+  // go up once in scope (for handlers)
+  if (!handler) throw new Error("No handler found for: " + name);
+  handlers = Object.getPrototypeOf(handler.handlerScope);
   return yield (currGen, then) => {
-    // TODO: what is then???
-    const handlers = currGen._handlers;
-    const handler = handlers[name];
     if (!handler) throw new Error("No handler for " + name);
-    const _then = handler._then;
-    // console.log("eq", then === _then);
     const handlerGen = handler(values, function* (val) {
       // pause handler, dont need to get gen and next because we already have it
-      return yield (__, __undefined) => {
-        // console.log(__ === handlerGen, __undefined === undefined);
+      return yield () => {
+        // console.log(__ === handlerGen, __undefined === returnToDelimitedContinuation);
         // resume function depending on handler with value (val)
         if (debug) console.log("->", val);
+        handlers = currHandlers;
         resume(currGen, val, (handlerVal) => {
-          resume(handlerGen, handlerVal, then); // TODO: why does chaning _then for then change the result in a weird way?
+          resume(handlerGen, handlerVal, then);
         });
       };
     });
-    start(handlerGen, _then); //start handlerGen, it gets interrupted and someone else handles it
-    // TODO: when I take out `then` I am forced to yield* k() in the handlers
+    start(handlerGen, returnToDelimitedContinuation);
   };
 }
 
@@ -128,29 +123,37 @@ function* test2() {
   // yield* perform("exn", "Nooo!");
   const p11 = yield* perform("plusOne", 1);
   const p12 = yield* perform("plusOne", 2);
+  const msg = yield* perform("name", "world");
   const p23 = yield* perform("plusOne", 3);
   console.log("plusOne: " + p11 + p12 + p23);
   return "plusOne: " + p11 + p12 + p23;
 }
 
 function* test() {
-  // const msg = yield* perform("name", "world");
+  const msg = yield* perform("name", "world");
   const number = yield* handle(test2, {
+    *return(val) {
+      return [val, yield* perform("name", "hi")];
+    },
     *plusOne(num, k) {
-      const res = yield* k(num + 1);
-      const name = yield* perform("name", "world");
-      return res + "num" + num;
+      const name = yield* perform("name", "notworld");
+      const [res] = yield* k(num + 1);
+      return [res, name];
     }
   });
   console.log("num", number);
   // return 0;
-  return number;
+  return number.join("");
   // return msg + "!";
 }
 
 function* hello() {
   const res = yield* getMsg(10);
   const res2 = yield* handle(test, {
+    *return(val) {
+      return val;
+      // return val;
+    },
     *name(name, k) {
       const res = yield* k("Hello " + name);
       return res;
@@ -169,7 +172,7 @@ function* getMsg(msg) {
 }
 
 const startGen = hello();
-// start(handle(startGen, Object.create(null)), (val) => console.log("done", val));
+start(startGen, (val) => console.log("done", val));
 
 // function* pausePlayTest() {
 //   return yield* pause((play) => {
@@ -180,20 +183,20 @@ const startGen = hello();
 // }
 // start(pausePlayTest(), console.log);
 
-function* consoleTest() {
-  yield* perform("print", "A");
-  yield* perform("print", "B");
-  yield* perform("print", "C");
-}
+// function* consoleTest() {
+//   yield* perform("print", "A");
+//   yield* perform("print", "B");
+//   yield* perform("print", "C");
+// }
 
 // start(
-// handle(consoleTest, {
-//   *print(val, k) {
-//     const ret = yield* k();
-//     console.log(val);
-//     return ret;
-//   }
-// }),
+//   handle(consoleTest, {
+//     *print(val, k) {
+//       const ret = yield* k();
+//       console.log(val);
+//       return ret;
+//     }
+//   }),
 //   () => {}
 // );
 
@@ -207,12 +210,12 @@ function* counter() {
 }
 
 function* mainCounter() {
-  const res = yield* state(5, counter());
+  const res = yield* state(50, counter());
   console.log(res);
 }
 
 function state(val, gen) {
-  return handle(
+  return withPrint(
     handle(gen, {
       *return(res) {
         return [res, val];
@@ -226,15 +229,25 @@ function state(val, gen) {
         const [ret] = yield* k();
         return [ret, val];
       }
-    }),
-    {
-      *print(val, k) {
-        const ret = yield* k();
-        console.log(val);
-        return ret;
-      }
-    }
+    })
   );
 }
 
-start(mainCounter(), () => {});
+const withPrint = (gen) =>
+  handle(gen, {
+    *return(res) {
+      return res;
+    },
+    *print(val, k) {
+      const ret = yield* k();
+      console.log(val);
+      return ret;
+    }
+  });
+
+// start(mainCounter(), () => {});
+
+// function* asyncExample() {
+//   yield* perform("")
+//   const res = yield* perform("wait", 1000);
+// }
