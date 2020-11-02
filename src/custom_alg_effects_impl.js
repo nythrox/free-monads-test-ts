@@ -22,14 +22,12 @@ let returnToDelimitedContinuation = null;
 
 function runGenerator(gen, arg, then) {
   const { value, done } = gen.next(arg);
-  // console.log(value);
   if (done) {
-    // const _return = gen._return;
     then(value);
   } else {
     // no recursion: TLDR, if you are gonna pause it, you better play it too
-    if (value?.PAUSE) {
-      value.f(gen, then);
+    if (typeof value === "function") {
+      value(gen, then);
       return;
     }
     throw new Error("yielded invalid value: " + value.toString());
@@ -39,61 +37,39 @@ function resume(gen, val, then) {
   runGenerator(gen, val, then);
 }
 function start(gen, onDone) {
-  // gen._return = onDone;
   runGenerator(gen, null, onDone);
 }
 function addScopeInfo(handlers) {
   for (const p in handlers) {
-    // console.log("setting", p, "to", handlers);
     handlers[p].handlerScope = handlers;
   }
 }
 
-function* handleMulti(fn, newHandlers) {}
-
-function* handle(fn, newHandlers) {
-  return yield {
-    PAUSE: true,
-    f: (lastGen, lastThen) => {
-      const thisThen = (res) => {
-        resume(lastGen, res, lastThen);
-      };
-      const currHandlers = handlers;
-      const currCont = returnToDelimitedContinuation;
-      const handlersObj = Object.assign(Object.create(handlers), newHandlers);
-      addScopeInfo(handlersObj);
-      // Object.setPrototypeOf(newHandlers, handlers);
-      // handlers = newHandlers;
-      handlers = handlersObj;
-      returnToDelimitedContinuation = thisThen;
-      const subGen = clonableIterator(
-        function* () {
-          let result = yield* fn();
-          if (newHandlers.return) {
-            const returnGen = newHandlers.return(result);
-            result = yield* returnGen;
-          }
-          return result;
-        },
-        [],
-        lastThen
-      );
-      // {
-      //   before: {
-      //     handlers: handlersObj,
-      //     returnToDelimitedContinuation: thisThen
-      //   },
-      //   after: {
-      //     handlers: currHandlers,
-      //     returnToDelimitedContinuation: currCont
-      //   }
-      // }
-      start(subGen, (val) => {
-        handlers = currHandlers;
-        returnToDelimitedContinuation = currCont;
-        thisThen(val);
-      });
-    }
+function* handle(fn, newHandlers, multi) {
+  return yield (lastGen, lastThen) => {
+    const thisThen = (res) => {
+      resume(lastGen, res, lastThen);
+    };
+    const currHandlers = handlers;
+    const currCont = returnToDelimitedContinuation;
+    const handlersObj = Object.assign(Object.create(handlers), newHandlers);
+    addScopeInfo(handlersObj);
+    handlers = handlersObj;
+    returnToDelimitedContinuation = thisThen;
+    const it = function* () {
+      let result = yield* fn();
+      if (newHandlers.return) {
+        const returnGen = newHandlers.return(result);
+        result = yield* returnGen;
+      }
+      return result;
+    };
+    const subGen = multi ? clonableIterator(it, [], lastThen) : it();
+    start(subGen, (val) => {
+      handlers = currHandlers;
+      returnToDelimitedContinuation = currCont;
+      thisThen(val);
+    });
   };
 }
 
@@ -111,56 +87,35 @@ function debugPerform(name, values) {
 function* perform(name, values) {
   debugPerform(name, values);
   // curr gen is only used to get the handlers and _then
-  return yield {
-    PAUSE: true,
-    f: (currGen, then) => {
-      // if (currGen.before) {
-      //   handlers = currGen.before.handlers;
-      //   returnToDelimitedContinuation =
-      //     currGen.before.returnToDelimitedContinuation;
-      // }
+  return yield (currGen, then) => {
+    const currHandlers = handlers;
+    const handler = currHandlers[name];
+    // go up once in scope (for handlers)
+    if (!handler) throw new Error("No handler found for: " + name);
+    handlers = Object.getPrototypeOf(handler.handlerScope);
 
-      const currHandlers = handlers;
-      const handler = currHandlers[name];
-      // go up once in scope (for handlers)
-      if (!handler) throw new Error("No handler found for: " + name);
-      handlers = Object.getPrototypeOf(handler.handlerScope);
+    const handlerGen = handler(values, function* (val) {
+      // pause handler, dont need to get gen and next because we already have it
+      return yield (__, ___) => {
+        // console.log(
+        //   __ === handlerGen,
+        //   ___ === returnToDelimitedContinuation || ___ === then
+        // );
+        // resume function depending on handler with value (val)
+        if (debug) console.log("->", val);
+        handlers = currHandlers;
 
-      const handlerGen = handler(values, function* (val) {
-        // pause handler, dont need to get gen and next because we already have it
-        return yield {
-          PAUSE: true,
-          f: () => {
-            // console.log(__ === handlerGen, __undefined === returnToDelimitedContinuation);
-            // resume function depending on handler with value (val)
-            if (debug) console.log("->", val);
-            handlers = currHandlers;
+        let g = currGen;
+        if (currGen.clone) {
+          g = currGen.clone();
+        }
+        resume(g, val, (handlerVal) => {
+          resume(handlerGen, handlerVal, then);
+        });
+      };
+    });
 
-            let g = currGen;
-            if (currGen.clone) {
-              g = currGen.clone();
-              //   console.log(
-              //     "has clone",
-              //     handlers,
-              //     currGen.clone().next(undefined, true)
-              //   );
-            }
-            resume(g, val, (handlerVal) => {
-              resume(handlerGen, handlerVal, (val) => {
-                // if (currGen.after) {
-                //   handlers = currGen.after.handlers;
-                //   returnToDelimitedContinuation =
-                //     currGen.after.returnToDelimitedContinuation;
-                // }
-                then(val);
-              });
-            });
-          }
-        };
-      });
-
-      start(handlerGen, returnToDelimitedContinuation);
-    }
+    start(handlerGen, returnToDelimitedContinuation);
   };
 }
 
@@ -186,7 +141,8 @@ function* pause(fn) {
 //         }
 //         return vals;
 //       }
-//     }
+//     },
+//     true
 //   );
 //   console.log(res);
 // }
