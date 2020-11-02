@@ -1,3 +1,12 @@
+// yield* is both for effects (yield (g,t) => {})
+// and also for calling other generators
+// problem: function*(){} is necessary for all blocks
+// (handle - beacuse of clone), but it is also necessary
+// for using yield*, maybe try to remove ambiguity from
+// normal function* div(x,y) { yield* eff}  ; and from obligatory block function *(){}
+
+// make it not obligatory to use generator functions in handler ( {eff: noresume((val) => "err happened")} )
+// add unique symbol on yield* because only differentiating with function causes unknown bugs
 function clonableIterator(it, history = []) {
   const gen = it();
   history.forEach((v) => gen.next(v));
@@ -221,7 +230,7 @@ function* getMsg(msg) {
 }
 
 const startGen = hello();
-start(startGen, (val) => console.log("done", val));
+// start(startGen, (val) => console.log("done", val));
 
 // function* pausePlayTest() {
 //   return yield* pause((play) => {
@@ -300,3 +309,28 @@ const withPrint = (gen) =>
 //   yield* perform("")
 //   const res = yield* perform("wait", 1000);
 // }
+
+// const safeDiv = function* (x, y) {
+//   if (y === 0) yield* perform("raise", "division by zero");
+//   return x / y;
+// };
+
+// const katch = (genFn, handler) =>
+//   handle(genFn, {
+//     *raise(val, k) {
+//       return handler(val);
+//     }
+//   });
+
+// function* zerodiv() {
+//   return yield* katch(
+//     function* () {
+//       return yield* safeDiv(5, 0);
+//     },
+//     (exn) => exn
+//   );
+// }
+
+// start(zerodiv(), (e) => console.log("done", e));
+
+
