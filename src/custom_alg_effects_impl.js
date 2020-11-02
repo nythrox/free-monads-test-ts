@@ -6,7 +6,10 @@
 // normal function* div(x,y) { yield* eff}  ; and from obligatory block function *(){}
 
 // make it not obligatory to use generator functions in handler ( {eff: noresume((val) => "err happened")} )
+// non obligatory return* fucntino genrerator
 // add unique symbol on yield* because only differentiating with function causes unknown bugs
+
+// create handler function that is curried (vs "handle" that is not)
 function clonableIterator(it, history = []) {
   const gen = it();
   history.forEach((v) => gen.next(v));
@@ -333,4 +336,26 @@ const withPrint = (gen) =>
 
 // start(zerodiv(), (e) => console.log("done", e));
 
+// function* xor() {
+//   const p = yield* perform("flip");
+//   const q = yield* perform("flip");
+//   return (p && !q) || (!p && q);
+// }
 
+// const amb = (gen) =>
+//   handle(
+//     gen,
+//     {
+//       *return(val) {
+//         return [val];
+//       },
+//       *flip(_, k) {
+//         const a = yield* k(false);
+//         const b = yield* k(true);
+//         return [...a, ...b];
+//       }
+//     },
+//     true
+//   );
+
+// start(amb(xor), console.log);
