@@ -14,7 +14,6 @@ import {
   Exn,
 } from './Free';
 
-
 const run = <B>(value: Free<any, B>) => async (
   handler: (val: Chained) => any | Promise<any>,
 ) => {

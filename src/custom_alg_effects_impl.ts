@@ -5,12 +5,13 @@
 // for using yield*, maybe try to remove ambiguity from
 // normal function* div(x,y) { yield* eff}  ; and from obligatory block function *(){}
 
+import { Eff } from './custom_alg_effects_impl.test';
+
 // make it not obligatory to use generator functions in handler ( {eff: noresume((val) => "err happened")} )
 // non obligatory return* fucntino genrerator
 // add unique symbol on yield* because only differentiating with function causes unknown bugs
-
 // create handler function that is curried (vs "handle" that is not)
-function clonableIterator(it, history = []) {
+function clonableIterator(it, history = [] as any[]) {
   const gen = it();
   history.forEach((v) => gen.next(v));
   return {
@@ -24,13 +25,13 @@ function clonableIterator(it, history = []) {
     },
     [Symbol.iterator]() {
       return this;
-    }
+    },
   };
 }
 
 let debug = false;
 let handlers = Object.create(null);
-let returnToDelimitedContinuation = null;
+let returnToDelimitedContinuation: any = null;
 
 function runGenerator(gen, arg, then) {
   const { value, done } = gen.next(arg);
@@ -38,17 +39,17 @@ function runGenerator(gen, arg, then) {
     then(value);
   } else {
     // no recursion: TLDR, if you are gonna pause it, you better play it too
-    if (typeof value === "function") {
+    if (typeof value === 'function') {
       value(gen, then);
       return;
     }
-    throw new Error("yielded invalid value: " + value.toString());
+    throw new Error('yielded invalid value: ' + value.toString());
   }
 }
 function resume(gen, val, then) {
   runGenerator(gen, val, then);
 }
-function start(gen, onDone) {
+export function start(gen, onDone) {
   runGenerator(gen, null, onDone);
 }
 function addScopeInfo(handlers) {
@@ -57,7 +58,7 @@ function addScopeInfo(handlers) {
   }
 }
 
-function* handle(fn, newHandlers, multi) {
+export function* handle(fn, newHandlers, multi = false) {
   return yield (lastGen, lastThen) => {
     const thisThen = (res) => {
       resume(lastGen, res, lastThen);
@@ -76,7 +77,7 @@ function* handle(fn, newHandlers, multi) {
       }
       return result;
     };
-    const subGen = multi ? clonableIterator(it, [], lastThen) : it();
+    const subGen = multi ? clonableIterator(it) : it();
     start(subGen, (val) => {
       handlers = currHandlers;
       returnToDelimitedContinuation = currCont;
@@ -89,21 +90,23 @@ function debugPerform(name, values) {
   if (debug) {
     console.log(
       `perform: (${name}, ${
-        typeof values === "string" ? `"${values}"` : values
-      })`
+        typeof values === 'string' ? `"${values}"` : values
+      })`,
     );
-    console.log("handlers", handlers);
+    console.log('handlers', handlers);
   }
 }
-
-function* perform(name, values) {
+export function* perform<Effect, Return>(
+  name: PropertyKey,
+  values?,
+): Eff<Return, Effect> {
   debugPerform(name, values);
   // curr gen is only used to get the handlers and _then
-  return yield (currGen, then) => {
+  return (yield ((currGen: any, then: any) => {
     const currHandlers = handlers;
     const handler = currHandlers[name];
     // go up once in scope (for handlers)
-    if (!handler) throw new Error("No handler found for: " + name);
+    if (!handler) throw new Error('No handler found for: ' + name.toString());
     handlers = Object.getPrototypeOf(handler.handlerScope);
 
     const handlerGen = handler(values, function* (val) {
@@ -114,7 +117,7 @@ function* perform(name, values) {
         //   ___ === returnToDelimitedContinuation || ___ === then
         // );
         // resume function depending on handler with value (val)
-        if (debug) console.log("->", val);
+        if (debug) console.log('->', val);
         handlers = currHandlers;
 
         let g = currGen;
@@ -128,7 +131,7 @@ function* perform(name, values) {
     });
 
     start(handlerGen, returnToDelimitedContinuation);
-  };
+  }) as any) as any;
 }
 
 function* pause(fn) {
@@ -176,16 +179,16 @@ function* pause(fn) {
 // calling a yield* handler(function*(){},x) will call it in a new scope x (new handler frame)
 function* test2() {
   // yield* perform("exn", "Nooo!");
-  const p11 = yield* perform("plusOne", 1);
-  const p12 = yield* perform("plusOne", 2);
-  const msg = yield* perform("name", "world");
-  const p23 = yield* perform("plusOne", 3);
-  return "plusOne: " + p11 + p12 + p23 + msg;
+  const p11 = yield* perform('plusOne', 1);
+  const p12 = yield* perform('plusOne', 2);
+  const msg = yield* perform('name', 'world');
+  const p23 = yield* perform('plusOne', 3);
+  return 'plusOne: ' + p11 + p12 + p23 + msg;
   // return ["10"];
   // return p11;
 }
 
-function* test() {
+function* testt() {
   // console.log("bef", handlers);
   // const msg = yield* perform("name", "world");
   // console.log("aft", handlers);
@@ -196,11 +199,11 @@ function* test() {
     },
     *plusOne(num, k) {
       const [res] = yield* k(num + 1);
-      const name = yield* perform("name", "notworld");
+      const name = yield* perform('name', 'notworld');
       return [res, name];
-    }
+    },
   });
-  return number.join("");
+  return number.join('');
   // return msg + "!";
 }
 
@@ -212,14 +215,14 @@ function* hello() {
       // return val;
     },
     *name(name, k) {
-      const res = yield* k("Hello " + name);
-      const res2 = yield* k("hwwo " + name);
+      const res = yield* k('Hello ' + name);
+      const res2 = yield* k('hwwo ' + name);
       return [res + res2];
       // return res;
     },
     *exn(exn, k) {
       return exn;
-    }
+    },
   });
   // return [res, res2];
   return res2;
@@ -262,10 +265,10 @@ const startGen = hello();
 // );
 
 function* counter() {
-  const i = yield* perform("get");
-  if (i <= 0) return "done";
+  const i = (yield* perform('get')) as number;
+  if (i <= 0) return 'done';
   else {
-    yield* perform("put", i - 1);
+    yield* perform('put', i - 1);
     return yield* counter();
   }
 }
@@ -289,8 +292,8 @@ function state(val, gen) {
         val = v;
         const [ret] = yield* k();
         return [ret, val];
-      }
-    })
+      },
+    }),
   );
 }
 
@@ -303,7 +306,7 @@ const withPrint = (gen) =>
       const ret = yield* k();
       console.log(val);
       return ret;
-    }
+    },
   });
 
 // start(mainCounter(), () => {});
@@ -313,28 +316,28 @@ const withPrint = (gen) =>
 //   const res = yield* perform("wait", 1000);
 // }
 
-// const safeDiv = function* (x, y) {
-//   if (y === 0) yield* perform("raise", "division by zero");
-//   return x / y;
-// };
+const safeDiv = function* (x, y) {
+  if (y === 0) yield* perform('raise', 'division by zero');
+  return x / y;
+};
 
-// const katch = (genFn, handler) =>
-//   handle(genFn, {
-//     *raise(val, k) {
-//       return handler(val);
-//     }
-//   });
+const katch = (genFn, handler) =>
+  handle(genFn, {
+    *raise(val, k) {
+      return handler(val);
+    },
+  });
 
-// function* zerodiv() {
-//   return yield* katch(
-//     function* () {
-//       return yield* safeDiv(5, 0);
-//     },
-//     (exn) => exn
-//   );
-// }
+function* zerodiv() {
+  return yield* katch(
+    function* () {
+      return yield* safeDiv(5, 0);
+    },
+    (exn) => exn,
+  );
+}
 
-// start(zerodiv(), (e) => console.log("done", e));
+start(zerodiv(), (e) => console.log('done', e));
 
 // function* xor() {
 //   const p = yield* perform("flip");

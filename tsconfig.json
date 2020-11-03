@@ -13,8 +13,10 @@
     "baseUrl": "./src/",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
+    "allowJs": true,
     "downlevelIteration": true,
-    "strict": true,
+    "strict": false,
+    "noImplicitAny": false,
     "isolatedModules": true
   },
   "include": ["src/**/*", "__tests__/**/*"]
