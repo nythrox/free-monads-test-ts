@@ -1,7 +1,7 @@
 import { Remove } from './effects.test';
 
 function isGenerator(x: any): x is GEN {
-  return x != null && typeof x.next === 'function';
+  return x && typeof x.next === 'function';
 }
 
 export type OP<_R = any, S extends string = string, T = any> = {
@@ -13,7 +13,7 @@ export type OP<_R = any, S extends string = string, T = any> = {
 function isOp<R = any, S extends string = string, T = any>(
   x: any,
 ): x is OP<R, S, T> {
-  return x != null && x._IS_OP;
+  return x && x._IS_OP;
 }
 
 export function op<
@@ -53,10 +53,7 @@ function resumeGenerator(gen: GEN, next: any, value?: any, done?: true) {
       _return(value);
     }
   } else {
-    if (isGenerator(value)) {
-      value._return = gen;
-      resumeGenerator(value, null);
-    } else if (typeof value === 'function') {
+    if (typeof value === 'function') {
       value(gen);
     } else if (isOp(value)) {
       while (true) {
@@ -101,15 +98,6 @@ interface EffFn {
   _return?: GEN | ((val: any) => void);
   _handler?: Handler;
 }
-// (
-// | {
-//     _return?: GEN;
-//     _handler?: Handler;
-//   }
-// | { _return?: (val: any) => void; _handler?: Handler }
-// ) {
-
-// }
 type CalculateGN<Gen extends GEN, Removed> = Gen extends GEN<infer A, infer B>
   ? GEN<Remove<A, Removed>, B>
   : never;
@@ -119,17 +107,20 @@ export function withHandler<G extends GEN, RemoveEnv>(
   handler: Handler<any>,
 ): CalculateGN<G, RemoveEnv> {
   function* withHandlerFrame(): GEN {
-    const result = yield gen;
+    const result = yield* gen;
     // eventually handles the return value
-    if (handler.return != null) {
-      return yield handler.return(result);
+    if (handler.return) {
+      return yield* handler.return(result);
     }
     return result;
   }
-
   const withHandlerGen = withHandlerFrame();
   withHandlerGen._handler = handler;
-  return toGenStar(withHandlerGen as any) as any;
+  return toGenStar((lastGen) => {
+    withHandlerGen._return = lastGen;
+    resumeGenerator(withHandlerGen, null);
+  }) as any;
+  // return toGenStar(withHandlerGen as any) as any;
 }
 
 function performOp(type: string, data: any, performGen: GEN) {
@@ -147,18 +138,19 @@ function performOp(type: string, data: any, performGen: GEN) {
   // found a handler, get the withHandler Generator
   const handlerFunc = withHandlerGen._handler[type] as HandlerFn;
 
-  const handler = handlerFunc(data, function delimitedCont(value) {
+  const handlerGen = handlerFunc(data, function delimitedCont(value) {
     return toGenStar((currentGen: GEN) => {
       withHandlerGen._return = currentGen;
       resumeGenerator(performGen, value);
     }) as any;
   });
-  if (isGenerator(handler)) {
+  // if (isGenerator(handlerGen)) {
     // will return to the parent of withHandler
-    handler._return = withHandlerGen._return;
-    resumeGenerator(handler, null);
-  } else {
-    return handler;
-  }
+    handlerGen._return = withHandlerGen._return;
+    resumeGenerator(handlerGen, null);
+  // } else {
+  //   console.log('@@@@@@@@HANDLER WAS NOT A GENERATOR')
+  //   return handlerGen;
+  // }
   return;
 }

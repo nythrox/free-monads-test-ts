@@ -12,11 +12,7 @@ interface StateGet<T> extends OP<T, 'state', { method: 'get' }> {}
 interface StateSet<T> extends OP<void, 'state', { value: T; method: 'set' }> {}
 interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
 interface Async<T> extends OP<T, 'resolve', { promise: Promise<T> }> {}
-
 interface Amb extends OP<any, 'list', { list: Amb }> {}
-
-
-
 // todo:
 /**
  
@@ -146,12 +142,16 @@ describe('Effects', () => {
   //   });
   //   start(programLogHandled, () => {});
   // });
-  it('should concat the msgs', () => {
-    const program = hello();
-    start(program, (res) => {
-      expect(res).toBe('plusOne: 234Hello worldHello worldHello world');
-      console.log(res);
-    });
+  // it('should concat the msgs', () => {
+  //   const program = hello();
+  //   start(program, (res) => {
+  //     expect(res).toBe('plusOne: 234Hello worldHello worldHello world');
+  //     console.log(res);
+  //   });
+  // });
+  it('should be wrong', () => {
+    const program = testmulti();
+    start(program, console.log);
   });
 });
 
@@ -246,3 +246,44 @@ declare const TMBDAPI: {
   movieCredits: (arg: any) => Generator<Async<List<Credits>>, List<Credits>>;
   person: (arg: any) => Generator<Async<Person>, Person, any>;
 };
+function* hey() {
+  yield* op('hi3', 30);
+  yield* op('hi1', 10);
+  yield* op('hi2', 20);
+  yield* op('hi1', 10);
+  yield* op('hi2', 20);
+  yield* op('hi3', 30);
+}
+function* testmulti() {
+  const res = yield* withHandler(
+    withHandler(
+      (function* () {
+        yield* hey();
+      })(),
+      {
+        *return(val) {
+          return [val, ''];
+        },
+        *hi1(num, k) {
+          const [res, acc] = yield* k(num);
+          return [res, num + acc];
+        },
+        *hi2(num, k) {
+          const [res, acc] = yield* k(num);
+          // return "(hi2 " + res + ")";
+          return [res, num + acc];
+        },
+      },
+    ),
+    {
+      *return(val) {
+        return val.join('');
+      },
+      *hi3(num, k) {
+        const res = yield* k(num);
+        return '(hi3 ' + res + ')';
+      },
+    },
+  );
+  return res;
+}
