@@ -66,7 +66,7 @@ function* mainState() {
   return newname;
 }
 const numberPromise = Promise.resolve(10);
-const transform = <E, A>(g: GEN<E, A>) => (0 as any) as GEN<Foo<E>, A>;
+const transform = <E, A>(_g: GEN<E, A>) => (0 as any) as GEN<Foo<E>, A>;
 const sla = transform(mainWait());
 // first filter it, then transform it back into Wait
 type Foo<T> = [T extends Wait<infer Z> ? Z : never] extends [infer U]

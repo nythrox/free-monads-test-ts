@@ -5,7 +5,7 @@
 // for using yield*, maybe try to remove ambiguity from
 // normal function* div(x,y) { yield* eff}  ; and from obligatory block function *(){}
 
-import { Eff } from './custom_alg_effects_impl.test';
+import { Eff } from './custom_alg_ef_impl.test';
 
 // make it not obligatory to use generator functions in handler ( {eff: noresume((val) => "err happened")} )
 // non obligatory return* fucntino genrerator

@@ -15,7 +15,6 @@ function isOp<R = any, S extends string = string, T = any>(
 ): x is OP<R, S, T> {
   return x && x._IS_OP;
 }
-
 export function op<
   _OP extends OP<any, any, any>,
   S = _OP['type'],
@@ -145,9 +144,9 @@ function performOp(type: string, data: any, performGen: GEN) {
     }) as any;
   });
   // if (isGenerator(handlerGen)) {
-    // will return to the parent of withHandler
-    handlerGen._return = withHandlerGen._return;
-    resumeGenerator(handlerGen, null);
+  // will return to the parent of withHandler
+  handlerGen._return = withHandlerGen._return;
+  resumeGenerator(handlerGen, null);
   // } else {
   //   console.log('@@@@@@@@HANDLER WAS NOT A GENERATOR')
   //   return handlerGen;
