@@ -13,27 +13,47 @@ interface Chain<R, E extends Effect> {
   type: "chain";
   then: (val: E["__returnWith"]) => FEM<R, E>;
 }
-interface Handle<P extends PropertyKey, E extends Effect, R, R2> {
+interface Handle<
+  P extends PropertyKey,
+  E extends Effect,
+  E2 extends Effect,
+  R,
+  R2
+> {
   type: "handle";
-  handlers: GetScopedHandlers<P, E, R, R2>;
-  handle: FEM<R>;
+  handlers: GetScopedHandlers<P, E, E2, R, R2>;
+  handle: FEM<R, E>;
 }
-type GetScopedHandlers<P extends PropertyKey, E extends Effect, R, R2> = {
+type GetScopedHandlers<
+  P extends PropertyKey,
+  E extends Effect,
+  E2 extends Effect,
+  R,
+  R2
+> = {
   // return: (val: R) => R2;
-} & { [val in P]: (val: E["value"], k: (val: E["__returnWith"]) => R) => R2 };
+} & {
+  [val in P]: (
+    val: E["value"],
+    k: (val: E["__returnWith"]) => FEM<R, never>
+  ) => FEM<R2, E2>;
+};
 
-const Handle = <P extends PropertyKey, E extends Effect, R, R2>(
+const Handle = <
+  P extends PropertyKey,
+  E extends Effect,
+  E2 extends Effect,
+  R,
+  R2
+>(
   program: FEM<R, E>,
-  handlers: GetScopedHandlers<P, E, R, R2>
+  handlers: GetScopedHandlers<P, E, E2, R, R2>
 ) => {
   return ({
     handle: program,
     handlers,
     type: "handle"
   } as any) as FEM<R2, E>;
-};
-type Add<P extends PropertyKey, V> = {
-  [val in P]: V;
 };
 
 type FEM<R, E extends Effect> = Chain<R, E> | Pure<R> | Handle<any, E, R, R>;
@@ -65,15 +85,18 @@ type GetHandlers<
     : never;
 };
 type HANDLERS = Record<PropertyKey, HANDLER>;
-type HANDLER = (val: any, k: K) => any;
+type HANDLER = (val: any, k: (val: any) => FEM<any, never>) => FEM<any, any>;
 type K = (val: any) => any;
 const last = (arr: any[]) => arr[arr.length - 1];
-const findHandler = (key: PropertyKey, arr: any[]): HANDLERS =>
+const minusLast = (arr: any[]) =>
+  arr.length - 1 > 0 ? arr.slice(0, arr.length - 1) : [];
+const findHandler = (key: PropertyKey, arr: any[]): HANDLER =>
   arr.length > 0
     ? last(arr)[key]
       ? last(arr)[key]
-      : findHandler(key, arr.length - 1 > 0 ? arr.slice(0, arr.length - 1) : [])
+      : findHandler(key, minusLast(arr))
     : undefined;
+
 const interpret = <R, Effects extends Effect>(
   program: FEM<R, Effects>,
   handlers: HANDLERS[] = []
@@ -81,16 +104,16 @@ const interpret = <R, Effects extends Effect>(
 ): R => {
   if (program.type === "handle") {
     return interpret(program.handle, [...handlers, program.handlers]);
-  }
-  if (program.type === "chain") {
+  } else if (program.type === "chain") {
     const handler = findHandler(program.effect.name, handlers);
     console.log(handler);
     if (!handler) {
       throw new Error("Handler not found for: " + program.effect.name);
     }
-    return handler(program.effect.value, (val) =>
+    const h = handler(program.effect.value, (val) =>
       interpret(program.then(val), handlers)
     );
+    return interpret(h, minusLast(handlers));
   } else return program.value;
 
   // let handlers: HANDLERS = {};
@@ -122,13 +145,16 @@ const main = Handle(
     ),
     {
       plusOne(num, k) {
-        return k(num + 1);
+        return Chain(
+          Length("owo"),
+          (owo1) => (console.log("owo length", owo1), Pure(k(num + 1)))
+        );
       }
     }
   ),
   {
     length(str, k) {
-      return k(str.length);
+      return Pure(k(str.length));
     }
   }
 );
