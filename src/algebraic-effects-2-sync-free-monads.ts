@@ -35,10 +35,10 @@ type GetScopedHandlers<
 } & {
   [val in P]: (
     val: E["value"],
-    k: (val: E["__returnWith"]) => FEM<R, never>
+    k: (val: E["__returnWith"], next: (val: R) => void) => void,
+    next: (val: FEM<R, never>) => void
   ) => FEM<R2, E2>;
 };
-
 const Handle = <
   P extends PropertyKey,
   E extends Effect,
@@ -85,7 +85,11 @@ type GetHandlers<
     : never;
 };
 type HANDLERS = Record<PropertyKey, HANDLER>;
-type HANDLER = (val: any, k: (val: any) => FEM<any, never>) => FEM<any, any>;
+type HANDLER = (
+  val: any,
+  k: (val: any, next: (val: any) => void) => void,
+  next: (val: FEM<any, any>) => void
+) => void;
 type K = (val: any) => any;
 const last = (arr: any[]) => arr[arr.length - 1];
 const minusLast = (arr: any[]) =>
@@ -99,76 +103,68 @@ const findHandler = (key: PropertyKey, arr: any[]): HANDLER =>
 
 const interpret = <R, Effects extends Effect>(
   program: FEM<R, Effects>,
-  handlers: HANDLERS[] = []
+  handlers: HANDLERS[] = [],
+  next: (val: R) => void
   // handlers: NoInfer<EffectsToKeys>
-): R => {
+): void => {
   if (program.type === "handle") {
-    return interpret(program.handle, [...handlers, program.handlers]);
+    interpret(program.handle, [...handlers, program.handlers], next);
+    return;
   } else if (program.type === "chain") {
     const handler = findHandler(program.effect.name, handlers);
-    console.log(handler);
     if (!handler) {
       throw new Error("Handler not found for: " + program.effect.name);
     }
-    const h = handler(program.effect.value, (val) =>
-      interpret(program.then(val), handlers)
+    handler(
+      program.effect.value,
+      (val, _next) => void interpret(program.then(val), handlers, _next),
+      // on done
+      (res) => void interpret(res, minusLast(handlers), next)
     );
-    return interpret(h, minusLast(handlers));
-  } else return program.value;
-
-  // let handlers: HANDLERS = {};
-  // let done!: R;
-  // while (program !== DONE) {
-  //   if (program.type === "chain") {
-  //     const handler = handlers[program.effect.name];
-  //     if (!handler) {
-  //       throw new Error("Handler not found for: " + program.effect.name);
-  //     }
-  //     const continueWithValue = handler(program.effect.value);
-  //     program = program.then(continueWithValue);
-  //     continue;
-  //   }
-  //   if (program.type === "pure") {
-  //     done = (program as Pure<any>).value;
-  //     program = DONE;
-  //   }
-  // }
-  // return done;
+    return;
+  } else {
+    next(program.value);
+  }
+  return;
 };
 
 type NoInfer<T> = [T][T extends any ? 0 : never];
 
 const main = Handle(
   Handle(
-    Chain(Length("hi"), (length) =>
+    Chain(Length("hi10"), (length) =>
       Chain(PlusOne(length), (plusOne) => Pure(plusOne))
     ),
     {
-      plusOne(num, k) {
-        return Chain(
-          Length("owo"),
-          (owo1) => (console.log("owo length", owo1), Pure(k(num + 1)))
-        );
+      plusOne(num, k, then) {
+        k(num + 1, (res1) => {
+          k(num + 2, (res2) => {
+            then(Pure("res1: " + res1 + " res2: " + res2));
+          });
+        });
       }
     }
   ),
   {
-    length(str, k) {
-      return Pure(k(str.length));
+    length(str, k, then) {
+      k(str.length, (val) => {
+        then(Pure(val));
+      });
     }
   }
 );
 
-const sla = interpret(main);
-console.log("done", sla);
+interpret(main, [], (sla) => console.log("done", sla));
 
-const sla = Handle(Pure<number, Length>(0), {
-  // return(val) {
-  //   return val;
-  // },
+// const sla = Handle(Pure<number, Length>(0), {
+//   // return(val) {
+//   //   return val;
+//   // },
 
-  length(str, v) {
-    const res = v(str.length);
-    return "done: " + res;
-  }
-});
+//   length(str, v) {
+//     const res = v(str.length);
+//     return "done: " + res;
+//   }
+// });
+
+//todo tommorow: fix type system, do async/multishot effects, cps style
