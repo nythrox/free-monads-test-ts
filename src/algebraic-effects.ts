@@ -3,7 +3,6 @@ import { Remove } from './effects.test';
 function isGenerator(x: any): x is GEN {
   return x && typeof x.next === 'function';
 }
-
 export type OP<_R = any, S extends string = string, T = any> = {
   _IS_OP: true;
   _________R: _R;

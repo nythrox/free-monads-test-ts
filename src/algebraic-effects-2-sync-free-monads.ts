@@ -1,3 +1,23 @@
+function clonableIterator(it: (...args: any[]) => Generator, history = []) {
+  return (...args: any[]) => {
+    const gen = it(...args);
+    history.forEach((v) => gen.next(v));
+    return {
+      next(arg: any) {
+        history.push(arg as never);
+        const res = gen.next(arg);
+        return res;
+      },
+      clone() {
+        return clonableIterator(it, [...history]);
+      },
+      [Symbol.iterator]() {
+        return this;
+      }
+    };
+  };
+}
+
 interface Effect<P extends PropertyKey = any, V = any, R = any> {
   name: P;
   value: V;
@@ -154,7 +174,7 @@ const main = Handle(
   }
 );
 
-interpret(main, [], (sla) => console.log("done", sla));
+// interpret(main, [], (sla) => console.log("done", sla));
 
 // const sla = Handle(Pure<number, Length>(0), {
 //   // return(val) {
@@ -167,4 +187,77 @@ interpret(main, [], (sla) => console.log("done", sla));
 //   }
 // });
 
+function interpretGenHandler(gen: Generator, v, onDone) {
+  const { value, done } = gen.next(v);
+  console.log("resumed with", v, "returned", value);
+  if (done) {
+    console.log("onDone", value);
+    onDone(Pure(value));
+  }
+}
+function genHandler<R, R2>(
+  fn: (val: R, k: (val: any) => { pause: true }) => Generator<R2>
+): HANDLER {
+  return (val, k, next) => {
+    const gen = fn(val, (resumeValue) => {
+      console.log("pausing");
+      k(resumeValue, (th) =>
+        setTimeout(() => interpretGenHandler(gen, th, next), 0)
+      );
+      return { pause: true };
+    });
+    interpretGenHandler(gen, undefined, next);
+  };
+}
+
 //todo tommorow: fix type system, do async/multishot effects, cps style
+function genToObjs<R, E extends Effect<any, any>>(
+  fun: () => Generator<E, R, never>
+): FEM<R, E extends FEM<any, infer U> ? U : never> {
+  const iterator = clonableIterator(fun)();
+  const state = iterator.next(undefined);
+  function run(
+    state: IteratorYieldResult<E> | IteratorReturnResult<R>
+  ): FEM<R, any> {
+    if (state.done) {
+      return Pure(state.value);
+    }
+    return Chain(state.value, (val) => {
+      const next = iterator.next(val as never); // typescript
+      return run(next);
+    });
+  }
+  return run(state);
+}
+const res = genToObjs(function* () {
+  const length = yield Length("123");
+  const plusOne = yield PlusOne(1);
+  return [length, plusOne];
+});
+
+interpret(
+  Handle(
+    Handle(res, {
+      plusOne(num, k, then) {
+        k(num + 1, (res1) => {
+          k(num + 2, (res2) => {
+            then(Pure("res1: " + res1 + "res2:" + res2));
+          });
+        });
+      }
+    }),
+    {
+      // length(str, k, then) {
+      //   k(str.length, (val) => {
+      //     then(Pure(val));
+      //   });
+      // }
+      length: genHandler(function* (str: string, k) {
+        const res = yield k(str.length);
+        return res;
+      })
+    }
+  ),
+  [],
+  (sla) => console.log("done", sla)
+);
