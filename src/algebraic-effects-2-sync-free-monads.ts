@@ -1,7 +1,7 @@
-interface Effect<P extends PropertyKey = any, T = any, R = any> {
+interface Effect<P extends PropertyKey = any, V = any, R = any> {
   name: P;
-  value: T;
-  ___willReturn: R;
+  value: V;
+  __returnWith: R;
 }
 
 interface Pure<R> {
@@ -11,13 +11,35 @@ interface Pure<R> {
 interface Chain<R, E extends Effect> {
   effect: E;
   type: "chain";
-  then: (val: E["___willReturn"]) => FEM<R, E>;
+  then: (val: E["__returnWith"]) => FEM<R, E>;
 }
+interface Handle<P extends PropertyKey, E extends Effect, R, R2> {
+  type: "handle";
+  handlers: GetScopedHandlers<P, E, R, R2>;
+  handle: FEM<R>;
+}
+type GetScopedHandlers<P extends PropertyKey, E extends Effect, R, R2> = {
+  // return: (val: R) => R2;
+} & { [val in P]: (val: E["value"], k: (val: E["__returnWith"]) => R) => R2 };
 
-type FEM<R, E extends Effect = never> = Chain<R, E> | Pure<R>;
+const Handle = <P extends PropertyKey, E extends Effect, R, R2>(
+  program: FEM<R, E>,
+  handlers: GetScopedHandlers<P, E, R, R2>
+) => {
+  return ({
+    handle: program,
+    handlers,
+    type: "handle"
+  } as any) as FEM<R2, E>;
+};
+type Add<P extends PropertyKey, V> = {
+  [val in P]: V;
+};
+
+type FEM<R, E extends Effect> = Chain<R, E> | Pure<R> | Handle<any, E, R, R>;
 const Chain = <E extends Effect, R, E2 extends Effect>(
   effect: E,
-  then: (val: E["___willReturn"]) => FEM<R, E2>
+  then: (val: E["__returnWith"]) => FEM<R, E2>
 ) =>
   ({
     effect,
@@ -32,56 +54,95 @@ const Length = (string: string) => Effect("length", string) as Length;
 interface PlusOne extends Effect<"plusOne", number, number> {}
 const PlusOne = (num: number) => Effect("plusOne", num) as PlusOne;
 
-type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (
-  k: infer I
-) => void
-  ? I
-  : never;
-const DONE = Symbol();
-const interpret = <
-  R,
+type GetHandlers<
   Effects extends Effect,
-  Keys extends PropertyKey = Effects["name"],
-  EffectsToKeys extends Record<PropertyKey, (val: any) => any> = {
-    [Key in Keys]: Effects extends Effect<infer K, infer V, infer R>
-      ? K extends Key
-        ? (val: V) => R
-        : never
-      : never;
+  Keys extends PropertyKey = Effects["name"]
+> = {
+  [Key in Keys]: Effects extends Effect<infer K, infer V, infer R>
+    ? K extends Key
+      ? (val: V) => R
+      : never
+    : never;
+};
+type HANDLERS = Record<PropertyKey, HANDLER>;
+type HANDLER = (val: any, k: K) => any;
+type K = (val: any) => any;
+const last = (arr: any[]) => arr[arr.length - 1];
+const findHandler = (key: PropertyKey, arr: any[]): HANDLERS =>
+  arr.length > 0
+    ? last(arr)[key]
+      ? last(arr)[key]
+      : findHandler(key, arr.length - 1 > 0 ? arr.slice(0, arr.length - 1) : [])
+    : undefined;
+const interpret = <R, Effects extends Effect>(
+  program: FEM<R, Effects>,
+  handlers: HANDLERS[] = []
+  // handlers: NoInfer<EffectsToKeys>
+): R => {
+  if (program.type === "handle") {
+    return interpret(program.handle, [...handlers, program.handlers]);
   }
->(
-  program: FEM<R, Effects> | typeof DONE,
-  handlers: NoInfer<EffectsToKeys>
-) => {
-  let done!: R;
-  while (program !== DONE) {
-    if (program.type === "chain") {
-      const continueWithValue = handlers[program.effect.name](
-        program.effect.value
-      );
-      program = program.then(continueWithValue);
-      continue;
+  if (program.type === "chain") {
+    const handler = findHandler(program.effect.name, handlers);
+    console.log(handler);
+    if (!handler) {
+      throw new Error("Handler not found for: " + program.effect.name);
     }
-    if (program.type === "pure") {
-      done = (program as Pure<any>).value;
-      program = DONE;
-    }
-  }
-  return done;
+    return handler(program.effect.value, (val) =>
+      interpret(program.then(val), handlers)
+    );
+  } else return program.value;
+
+  // let handlers: HANDLERS = {};
+  // let done!: R;
+  // while (program !== DONE) {
+  //   if (program.type === "chain") {
+  //     const handler = handlers[program.effect.name];
+  //     if (!handler) {
+  //       throw new Error("Handler not found for: " + program.effect.name);
+  //     }
+  //     const continueWithValue = handler(program.effect.value);
+  //     program = program.then(continueWithValue);
+  //     continue;
+  //   }
+  //   if (program.type === "pure") {
+  //     done = (program as Pure<any>).value;
+  //     program = DONE;
+  //   }
+  // }
+  // return done;
 };
 
 type NoInfer<T> = [T][T extends any ? 0 : never];
 
-const main = Chain(Length("helloworld"), (length) =>
-  Chain(PlusOne(length), (plusOne) => Pure(plusOne))
+const main = Handle(
+  Handle(
+    Chain(Length("hi"), (length) =>
+      Chain(PlusOne(length), (plusOne) => Pure(plusOne))
+    ),
+    {
+      plusOne(num, k) {
+        return k(num + 1);
+      }
+    }
+  ),
+  {
+    length(str, k) {
+      return k(str.length);
+    }
+  }
 );
 
-const sla = interpret(main, {
-  plusOne(num) {
-    return num + 1;
-  },
-  length(str) {
-    return str.length;
+const sla = interpret(main);
+console.log("done", sla);
+
+const sla = Handle(Pure<number, Length>(0), {
+  // return(val) {
+  //   return val;
+  // },
+
+  length(str, v) {
+    const res = v(str.length);
+    return "done: " + res;
   }
 });
-console.log("done", sla);
