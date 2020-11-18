@@ -191,3 +191,157 @@ const main2 = Handle(
 );
 
 interpret(main2, [], console.log);
+
+
+
+function clonableIterator(it: (...args: any[]) => Generator, history = []) {
+  return (...args: any[]) => {
+    const gen = it(...args);
+    history.forEach((v) => gen.next(v));
+    return {
+      next(arg: any) {
+        history.push(arg as never);
+        const res = gen.next(arg);
+        return res;
+      },
+      clone() {
+        return clonableIterator(it, [...history])(...args);
+      },
+      [Symbol.iterator]() {
+        return this;
+      }
+    };
+  };
+}
+type NoInfer<T> = [T][T extends any ? 0 : never];
+
+// const main = Handle(
+//   Handle(
+//     Chain(Length("hi10"), (length) =>
+//       Chain(PlusOne(length), (plusOne) => Pure(plusOne))
+//     ),
+//     {
+//       plusOne(num, k, then) {
+//         k(num + 1, (res1) => {
+//           k(num + 2, (res2) => {
+//             then(Pure("res1: " + res1 + " res2: " + res2));
+//           });
+//         });
+//       }
+//     }
+//   ),
+//   {
+//     length(str, k, then) {
+//       k(str.length, (val) => {
+//         then(Pure(val));
+//       });
+//     }
+//   }
+// );
+
+// interpret(main, [], (sla) => console.log("done", sla));
+
+// const sla = Handle(Pure<number, Length>(0), {
+//   // return(val) {
+//   //   return val;
+//   // },
+
+//   length(str, v) {
+//     const res = v(str.length);
+//     return "done: " + res;
+//   }
+// });
+
+// function interpretGenHandler(gen: Generator, v, onDone) {
+//   // console.log(gen.clone());
+//   const { value, done } = gen.next(v);
+//   if (done) {
+//     onDone(Pure(value));
+//   }
+// }
+
+// const PAUSE = Effect("pause", undefined);
+
+// function genHandler<R, R2>(
+//   fn: (val: R, k: (val: any) => typeof PAUSE) => Generator<R2>
+// ): HANDLER {
+//   return (val, k, next) => {
+//     const gen = fn(val, (resumeValue) => {
+//       k(resumeValue, (th) =>
+//         setTimeout(() => interpretGenHandler(gen, th, next), 0)
+//       );
+//       return PAUSE;
+//     });
+//     interpretGenHandler(gen, undefined, next);
+//   };
+// }
+
+//todo tommorow: fix type async/multishot effects, cps style
+function genToObjs<R, E extends Effect<any, any>>(
+  fun: () => Generator<E, R, never>
+): FEM<R, E extends FEM<any, infer U> ? U : never> {
+  const iterator = clonableIterator(fun)();
+  const state = iterator.next(undefined);
+  function run(
+    state: IteratorYieldResult<E> | IteratorReturnResult<R>
+  ): FEM<R, any> {
+    if (state.done) {
+      return Pure(state.value);
+    } else {
+      const res = Chain(state.value, (val) => {
+        const next = iterator.next(val as never); // typescript
+        return run(next);
+      });
+      res.clone = genToObjs(iterator.clone);
+      return res;
+    }
+  }
+  return run(state);
+}
+const res = genToObjs(function* () {
+  const plusOne = yield PlusOne(1);
+  const length = yield Length("123");
+  return [length, plusOne];
+});
+
+// interpret(
+//   Handle(
+//     Handle(res, {
+//       plusOne: (num: number, k) =>
+//         genToObjs(function* () {
+//           const once = yield k(num + 1);
+//           // const twice = yield k(num + 2);
+//           return once;
+//           // return "res1: " + once + " res2:" + twice;
+//         })
+//       // plusOne(num, k, then) {
+//       //   k(num + 1, (res1) => {
+//       //     k(num + 2, (res2) => {
+//       //       then(Pure("res1: " + res1 + "res2:" + res2));
+//       //     });
+//       //   });
+//       // }
+//     }),
+//     {
+//       // length(str, k, then) {
+//       //   k(str.length, (val) => {
+//       //     then(Pure(val));
+//       //   });
+//       // }
+//       length: (str: string, k) =>
+//         genToObjs(function* () {
+//           const res = yield k(str.length);
+//           return res;
+//           // return "owo";
+//         })
+//     }
+//   ),
+//   [],
+//   (sla) => console.log("done", sla)
+// );
+
+console.log(res);
+const v2 = res.clone();
+console.log(v2);
+// console.log(res.then(10));
+// console.log(res.then(11));
