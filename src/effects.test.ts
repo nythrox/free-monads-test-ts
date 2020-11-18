@@ -256,12 +256,12 @@ declare const TMBDAPI: {
   person: (arg: any) => Generator<Async<Person>, Person, any>;
 };
 function* hey() {
-  yield* op('hi3', 30);
-  yield* op('hi1', 10);
-  yield* op('hi2', 20);
   yield* op('hi1', 10);
   yield* op('hi2', 20);
   yield* op('hi3', 30);
+  yield* op('hi3', 30);
+  yield* op('hi1', 10);
+  yield* op('hi2', 20);
 }
 function* testmulti() {
   const res = yield* withHandler(

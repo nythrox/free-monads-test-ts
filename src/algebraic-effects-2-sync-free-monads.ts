@@ -1,23 +1,3 @@
-function clonableIterator(it: (...args: any[]) => Generator, history = []) {
-  return (...args: any[]) => {
-    const gen = it(...args);
-    history.forEach((v) => gen.next(v));
-    return {
-      next(arg: any) {
-        history.push(arg as never);
-        const res = gen.next(arg);
-        return res;
-      },
-      clone() {
-        return clonableIterator(it, [...history]);
-      },
-      [Symbol.iterator]() {
-        return this;
-      }
-    };
-  };
-}
-
 interface Effect<P extends PropertyKey = any, V = any, R = any> {
   name: P;
   value: V;
@@ -53,12 +33,14 @@ type GetScopedHandlers<
 > = {
   // return: (val: R) => R2;
 } & {
-  [val in P]: (
-    val: E["value"],
-    k: (val: E["__returnWith"], next: (val: R) => void) => void,
-    next: (val: FEM<R, never>) => void
-  ) => FEM<R2, E2>;
+  [val in P]: (val: R, k: (val: any) => void) => Generator<R2>;
+  // (
+  //   val: E["value"],
+  //   k: (val: E["__returnWith"], next: (val: R) => void) => void,
+  //   next: (val: FEM<R, never>) => void
+  // ) => FEM<R2, E2>;
 };
+
 const Handle = <
   P extends PropertyKey,
   E extends Effect,
@@ -105,6 +87,7 @@ type GetHandlers<
     : never;
 };
 type HANDLERS = Record<PropertyKey, HANDLER>;
+
 type HANDLER = (
   val: any,
   k: (val: any, next: (val: any) => void) => void,
@@ -139,7 +122,8 @@ const interpret = <R, Effects extends Effect>(
       program.effect.value,
       (val, _next) => void interpret(program.then(val), handlers, _next),
       // on done
-      (res) => void interpret(res, minusLast(handlers), next)
+      (res) => void interpret(res, minusLast(handlers), next),
+      minusLast(handlers)
     );
     return;
   } else {
@@ -147,117 +131,63 @@ const interpret = <R, Effects extends Effect>(
   }
   return;
 };
+// const main = Handle(
+//   Handle(
+//     Chain(Effect("plusOne", 1), (plusOne) =>
+//       Chain(Effect("plusOne", 2), (p12) => {
+//         return Chain(Effect("plusOne", 3), (p23) => {
+//           return Pure("plusOne: " + plusOne + p12 + p23);
+//         });
+//       })
+//     ),
+//     {
+//       plusOne(num, k, next, handlers) {
+//         interpret(
+//           Chain(Effect("name", "world"), (name) => Pure(name)),
+//           handlers,
+//           (name) => {
+//             k(num + 1, (res) => {
+//               // k(num + 2, (res2) => {
+//               next(Pure(res + name));
+//               // });
+//             });
+//           }
+//         );
+//       }
+//     }
+//   ),
+//   {
+//     name(name, k, next) {
+//       k("Hello " + name, (res) => {
+//         next(Pure(res));
+//       });
+//     }
+//   }
+// );
+// interpret(main, [], console.log);
 
-type NoInfer<T> = [T][T extends any ? 0 : never];
-
-const main = Handle(
+const main2 = Handle(
   Handle(
-    Chain(Length("hi10"), (length) =>
-      Chain(PlusOne(length), (plusOne) => Pure(plusOne))
+    Chain(Effect("test1", "hi0"), (hi0) =>
+      Chain(Effect("test0", "hi1"), (hi1) =>
+        Chain(Effect("test0", "hi0"), (hi3) => Pure(hi0 + hi1 + hi3))
+      )
     ),
     {
-      plusOne(num, k, then) {
-        k(num + 1, (res1) => {
-          k(num + 2, (res2) => {
-            then(Pure("res1: " + res1 + " res2: " + res2));
-          });
+      test0(val, k, then) {
+        k(val, (res) => {
+          then(Pure("~" + res + "~"));
         });
       }
     }
   ),
   {
-    length(str, k, then) {
-      k(str.length, (val) => {
-        then(Pure(val));
+    test1(val, k, then) {
+      k(val, (res) => {
+        then(Pure("(" + res + ")"));
       });
     }
   }
 );
 
-// interpret(main, [], (sla) => console.log("done", sla));
-
-// const sla = Handle(Pure<number, Length>(0), {
-//   // return(val) {
-//   //   return val;
-//   // },
-
-//   length(str, v) {
-//     const res = v(str.length);
-//     return "done: " + res;
-//   }
-// });
-
-function interpretGenHandler(gen: Generator, v, onDone) {
-  const { value, done } = gen.next(v);
-  console.log("resumed with", v, "returned", value);
-  if (done) {
-    console.log("onDone", value);
-    onDone(Pure(value));
-  }
-}
-function genHandler<R, R2>(
-  fn: (val: R, k: (val: any) => { pause: true }) => Generator<R2>
-): HANDLER {
-  return (val, k, next) => {
-    const gen = fn(val, (resumeValue) => {
-      console.log("pausing");
-      k(resumeValue, (th) =>
-        setTimeout(() => interpretGenHandler(gen, th, next), 0)
-      );
-      return { pause: true };
-    });
-    interpretGenHandler(gen, undefined, next);
-  };
-}
-
-//todo tommorow: fix type system, do async/multishot effects, cps style
-function genToObjs<R, E extends Effect<any, any>>(
-  fun: () => Generator<E, R, never>
-): FEM<R, E extends FEM<any, infer U> ? U : never> {
-  const iterator = clonableIterator(fun)();
-  const state = iterator.next(undefined);
-  function run(
-    state: IteratorYieldResult<E> | IteratorReturnResult<R>
-  ): FEM<R, any> {
-    if (state.done) {
-      return Pure(state.value);
-    }
-    return Chain(state.value, (val) => {
-      const next = iterator.next(val as never); // typescript
-      return run(next);
-    });
-  }
-  return run(state);
-}
-const res = genToObjs(function* () {
-  const length = yield Length("123");
-  const plusOne = yield PlusOne(1);
-  return [length, plusOne];
-});
-
-interpret(
-  Handle(
-    Handle(res, {
-      plusOne(num, k, then) {
-        k(num + 1, (res1) => {
-          k(num + 2, (res2) => {
-            then(Pure("res1: " + res1 + "res2:" + res2));
-          });
-        });
-      }
-    }),
-    {
-      // length(str, k, then) {
-      //   k(str.length, (val) => {
-      //     then(Pure(val));
-      //   });
-      // }
-      length: genHandler(function* (str: string, k) {
-        const res = yield k(str.length);
-        return res;
-      })
-    }
-  ),
-  [],
-  (sla) => console.log("done", sla)
-);
+interpret(main2, [], console.log);
