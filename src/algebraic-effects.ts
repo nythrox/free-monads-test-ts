@@ -1,7 +1,7 @@
-import { Remove } from './effects.test';
+import { Remove } from "./effects.test";
 
 function isGenerator(x: any): x is GEN {
-  return x && typeof x.next === 'function';
+  return x && typeof x.next === "function";
 }
 export type OP<_R = any, S extends string = string, T = any> = {
   _IS_OP: true;
@@ -10,14 +10,14 @@ export type OP<_R = any, S extends string = string, T = any> = {
   type: S;
 };
 function isOp<R = any, S extends string = string, T = any>(
-  x: any,
+  x: any
 ): x is OP<R, S, T> {
   return x && x._IS_OP;
 }
 export function op<
   _OP extends OP<any, any, any>,
-  S = _OP['type'],
-  T = _OP['data'],
+  S = _OP["type"],
+  T = _OP["data"],
   R = _OP extends OP<infer R, any, any> ? R : never
 >(type: S, data: T): Generator<_OP, R, any> {
   // return (yield {
@@ -28,7 +28,7 @@ export function op<
   return toGenStar<_OP, R>({
     _IS_OP: true,
     type,
-    data,
+    data
   } as any);
 }
 
@@ -36,45 +36,45 @@ export function* toGenStar<T, R>(valueToYield: T): Generator<T, R, any> {
   return (yield valueToYield) as R;
 }
 
-export function resume(gen: GEN, arg?: any) {
-  return resumeGenerator(gen, arg, null);
-}
-function resumeGenerator(gen: GEN, next: any, value?: any, done?: true) {
+// export function resume(gen: GEN, arg?: any, onDone: (val: any) => void) {
+//   return resumeGenerator(gen, arg, null, undefined, onDone);
+// }
+function resumeGenerator(
+  gen: GEN,
+  next: any | undefined,
+  value: any | undefined,
+  done: true | undefined,
+  onDone: (val: any) => void
+) {
   if (done === undefined)
     ({ value, done } = gen.next(next) as { value: any; done?: true });
 
   if (done) {
     const _return = gen._return;
-    if (isGenerator(_return)) {
-      resumeGenerator(_return, value);
-    } else if (typeof _return === 'function') {
-      _return(value);
+    if (_return) {
+      // let log = { ..._return };
+      // delete log.throw;
+      // delete log.next;
+      // delete log.return;
+      console.log(_return);
+      resumeGenerator(_return, value, undefined, undefined, onDone);
     }
+    // } else if (typeof _return === "function") {
+    // console.log("@_return(value)");
+    else onDone!(value);
+    // }
   } else {
-    if (typeof value === 'function') {
-      value(gen);
+    if (typeof value === "function") {
+      value(gen, onDone);
     } else if (isOp(value)) {
-      while (true) {
-        const result = performOp(value.type, value.data, gen);
-        if (result !== undefined) {
-          ({ value, done } = gen.next(result) as { value: any; done?: true });
-          if (!isOp(value)) {
-            resumeGenerator(gen, null, value, done);
-            break;
-          }
-        } else {
-          break;
-        }
-      }
-    } else {
-      resumeGenerator(gen, value);
-    }
+      performOp(value.type, value.data, gen, onDone);
+    } else throw new Error("Yielded invalid value" + value);
   }
 }
 
 export function start<R>(gen: GEN<never, R>, onDone: (val: R) => void) {
-  gen._return = onDone;
-  resumeGenerator(gen, null);
+  // gen._return = onDone;
+  resumeGenerator(gen, null, undefined, undefined, onDone);
 }
 // export interface Handler<R = any> {
 //   // ExtraEnv = any,  TODO: missing extra env from inside the handlers
@@ -102,7 +102,7 @@ type CalculateGN<Gen extends GEN, Removed> = Gen extends GEN<infer A, infer B>
 export type GEN<E = any, R = any> = Generator<E, R, any> & EffFn;
 export function withHandler<G extends GEN, RemoveEnv>(
   gen: G,
-  handler: Handler<any>,
+  handler: Handler<any>
 ): CalculateGN<G, RemoveEnv> {
   function* withHandlerFrame(): GEN {
     const result = yield* gen;
@@ -114,14 +114,19 @@ export function withHandler<G extends GEN, RemoveEnv>(
   }
   const withHandlerGen = withHandlerFrame();
   withHandlerGen._handler = handler;
-  return toGenStar((lastGen) => {
+  return toGenStar((lastGen, onDone) => {
     withHandlerGen._return = lastGen;
-    resumeGenerator(withHandlerGen, null);
+    resumeGenerator(withHandlerGen, null, undefined, undefined, onDone);
   }) as any;
   // return toGenStar(withHandlerGen as any) as any;
 }
 
-function performOp(type: string, data: any, performGen: GEN) {
+function performOp(
+  type: string,
+  data: any,
+  performGen: GEN,
+  onDone: (val: any) => void
+) {
   // finds the closest handler for effect `type`
   let withHandlerGen = performGen;
   while (withHandlerGen._handler == null || !withHandlerGen._handler[type]) {
@@ -134,21 +139,61 @@ function performOp(type: string, data: any, performGen: GEN) {
   }
 
   // found a handler, get the withHandler Generator
-  const handlerFunc = withHandlerGen._handler[type] as HandlerFn;
+  const handlerFunc = withHandlerGen._handler[type]!;
 
   const handlerGen = handlerFunc(data, function delimitedCont(value) {
-    return toGenStar((currentGen: GEN) => {
+    return toGenStar((currentGen: GEN, onDone) => {
       withHandlerGen._return = currentGen;
-      resumeGenerator(performGen, value);
+      // withHandlerGen._return = (value) => resumeGenerator(currentGen, value);
+      resumeGenerator(performGen, value, undefined, undefined, onDone);
     }) as any;
   });
   // if (isGenerator(handlerGen)) {
   // will return to the parent of withHandler
   handlerGen._return = withHandlerGen._return;
-  resumeGenerator(handlerGen, null);
+  resumeGenerator(handlerGen, null, undefined, undefined, onDone);
   // } else {
   //   console.log('@@@@@@@@HANDLER WAS NOT A GENERATOR')
   //   return handlerGen;
   // }
   return;
 }
+
+function* hey() {
+  yield* op("hi1", 10);
+  yield* op("hi2", 20);
+  yield* op("hi3", 30);
+  yield* op("hi1", 10);
+  yield* op("hi2", 20);
+  yield* op("hi3", 30);
+}
+function* testmulti() {
+  const res = yield* withHandler(
+    withHandler(hey(), {
+      *return(val) {
+        return [val, ""];
+      },
+      *hi1(num, k) {
+        const [res, acc] = yield* k(num);
+        return [res, num + acc];
+      },
+      *hi2(num, k) {
+        const [res, acc] = yield* k(num);
+        // return "(hi2 " + res + ")";
+        return [res, num + acc];
+      }
+    }),
+    {
+      *return(val) {
+        return val.join("");
+      },
+      *hi3(num, k) {
+        const res = yield* k(num);
+        return "(hi3 " + res + ")";
+      }
+    }
+  );
+  return res;
+}
+
+start(testmulti(), console.log);
