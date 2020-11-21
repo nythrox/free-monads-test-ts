@@ -74,7 +74,7 @@ type Foo<T> = [T extends Wait<infer Z> ? Z : never] extends [infer U]
     ? Wait<U> | Remove<T, Wait<any>>
     : never
   : never;
-  // type Foo<T> = [T] extends [Wait<infer Z>] ? Wait<Z> | Remove<T, Wait<any>>: never
+// type Foo<T> = [T] extends [Wait<infer Z>] ? Wait<Z> | Remove<T, Wait<any>>: never
 
 function* mainWait() {
   yield* log('stated waiting...');
@@ -207,8 +207,8 @@ export function withWait<G extends GEN, Milliseconds extends number>(
     //     return val;
     //   },
     *wait(data: { milliseconds: number }, cont) {
-      yield* toGenStar((parent: GEN) => {
-        setTimeout(() => resume(parent), data.milliseconds);
+      yield* toGenStar((parent: GEN, onDone) => {
+        setTimeout(() => resume(parent, undefined, onDone), data.milliseconds);
       });
       return yield* cont();
     },
@@ -218,9 +218,9 @@ export function withWait<G extends GEN, Milliseconds extends number>(
 export function async<G extends GEN, V>(comp: G) {
   return withHandler<G, Async<V>>(comp, {
     *resolve(data: { promise: Promise<V> }, cont) {
-      yield (parent: GEN) => {
+      yield (parent: GEN, onDone) => {
         data.promise.then((val) => {
-          resume(parent, val);
+          resume(parent, val, onDone);
         });
       };
       return yield* cont();

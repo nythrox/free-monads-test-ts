@@ -36,45 +36,32 @@ export function* toGenStar<T, R>(valueToYield: T): Generator<T, R, any> {
   return (yield valueToYield) as R;
 }
 
-// export function resume(gen: GEN, arg?: any, onDone: (val: any) => void) {
-//   return resumeGenerator(gen, arg, null, undefined, onDone);
-// }
+export function resume(gen: GEN, arg: any, onDone: (val: any) => void) {
+  return resumeGenerator(gen, arg, onDone);
+}
 function resumeGenerator(
   gen: GEN,
-  next: any | undefined,
-  value: any | undefined,
-  done: true | undefined,
+  nextVal: any | undefined,
   onDone: (val: any) => void
 ) {
-  if (done === undefined)
-    ({ value, done } = gen.next(next) as { value: any; done?: true });
-
+  const { value, done } = gen.next(nextVal) as { value: any; done?: true };
   if (done) {
     const _return = gen._return;
     if (_return) {
-      // let log = { ..._return };
-      // delete log.throw;
-      // delete log.next;
-      // delete log.return;
-      console.log(_return);
-      resumeGenerator(_return, value, undefined, undefined, onDone);
-    }
-    // } else if (typeof _return === "function") {
-    // console.log("@_return(value)");
-    else onDone!(value);
-    // }
+      resumeGenerator(_return, value, onDone);
+    } else onDone!(value);
   } else {
     if (typeof value === "function") {
       value(gen, onDone);
     } else if (isOp(value)) {
       performOp(value.type, value.data, gen, onDone);
-    } else throw new Error("Yielded invalid value" + value);
+    } else throw new Error("Yielded invalid value: " + value);
   }
 }
 
 export function start<R>(gen: GEN<never, R>, onDone: (val: R) => void) {
   // gen._return = onDone;
-  resumeGenerator(gen, null, undefined, undefined, onDone);
+  resumeGenerator(gen, null, onDone);
 }
 // export interface Handler<R = any> {
 //   // ExtraEnv = any,  TODO: missing extra env from inside the handlers
@@ -93,7 +80,7 @@ export type HandlerFn<ExtraEnv = any, R = any> = {
 };
 
 interface EffFn {
-  _return?: GEN | ((val: any) => void);
+  _return?: GEN;
   _handler?: Handler;
 }
 type CalculateGN<Gen extends GEN, Removed> = Gen extends GEN<infer A, infer B>
@@ -116,7 +103,7 @@ export function withHandler<G extends GEN, RemoveEnv>(
   withHandlerGen._handler = handler;
   return toGenStar((lastGen, onDone) => {
     withHandlerGen._return = lastGen;
-    resumeGenerator(withHandlerGen, null, undefined, undefined, onDone);
+    resumeGenerator(withHandlerGen, null, onDone);
   }) as any;
   // return toGenStar(withHandlerGen as any) as any;
 }
@@ -145,55 +132,16 @@ function performOp(
     return toGenStar((currentGen: GEN, onDone) => {
       withHandlerGen._return = currentGen;
       // withHandlerGen._return = (value) => resumeGenerator(currentGen, value);
-      resumeGenerator(performGen, value, undefined, undefined, onDone);
+      resumeGenerator(performGen, value, onDone);
     }) as any;
   });
   // if (isGenerator(handlerGen)) {
   // will return to the parent of withHandler
   handlerGen._return = withHandlerGen._return;
-  resumeGenerator(handlerGen, null, undefined, undefined, onDone);
+  resumeGenerator(handlerGen, null, onDone);
   // } else {
   //   console.log('@@@@@@@@HANDLER WAS NOT A GENERATOR')
   //   return handlerGen;
   // }
   return;
 }
-
-function* hey() {
-  yield* op("hi1", 10);
-  yield* op("hi2", 20);
-  yield* op("hi3", 30);
-  yield* op("hi1", 10);
-  yield* op("hi2", 20);
-  yield* op("hi3", 30);
-}
-function* testmulti() {
-  const res = yield* withHandler(
-    withHandler(hey(), {
-      *return(val) {
-        return [val, ""];
-      },
-      *hi1(num, k) {
-        const [res, acc] = yield* k(num);
-        return [res, num + acc];
-      },
-      *hi2(num, k) {
-        const [res, acc] = yield* k(num);
-        // return "(hi2 " + res + ")";
-        return [res, num + acc];
-      }
-    }),
-    {
-      *return(val) {
-        return val.join("");
-      },
-      *hi3(num, k) {
-        const res = yield* k(num);
-        return "(hi3 " + res + ")";
-      }
-    }
-  );
-  return res;
-}
-
-start(testmulti(), console.log);
