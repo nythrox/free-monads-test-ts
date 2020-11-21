@@ -136,3 +136,33 @@ function performOp(type: string, data: any, performGen: GEN) {
   activatedHandlerGen._return = handlersAndAfterReturnGen._return;
   resumeGenerator(activatedHandlerGen, null);
 }
+
+
+/**
+ * 
+function* hey() { <- performGen (actually adapted withHandlerGen)
+  yield* op("hi1", "10");
+}
+function* testmulti() { <- handlersAndAfterReturnGen._return
+  yield* withHandler(hey(),{ <- handlersAndAfterReturnGen
+       *h1(){...} <- activatedHandlerGen
+  }) 
+}
+`->` = `returns to`
+
+performGen (adapted hey)
+  -> handlersAndAfterReturnGen (withHandler)
+     -> handlersAndAfterReturnGen (h1)
+        -> handlersAndAfterReturnGen._return (testMulti)
+
+
+        
+
+the truth is that before k() and after k() are two very different functions, the first is activated immediately and the second
+is only activated afther the handler is done
+his impl can do that with { return yield* gen etc... }.return = // continue second half of handler with result F
+
+
+to be able to make handler function (return to)/continue the activated handler function, you need to represent
+them as objets or some way where they can be switched if needed (if activated)
+ */
