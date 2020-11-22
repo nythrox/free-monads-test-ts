@@ -41,7 +41,7 @@ function resumeGenerator(gen: GEN, nextVal: any | undefined) {
     const _return = gen._return;
     if (_return) {
       resumeGenerator(_return, value);
-    } else gen._onDone(value);
+    } else gen._onDone!(value);
   } else {
     if (typeof value === 'function') {
       value(gen);
@@ -73,7 +73,7 @@ export type HandlerFn<ExtraEnv = any, R = any> = {
 
 interface EffFn {
   _return?: GEN;
-  _onDone: (val: any) => void;
+  _onDone?: (val: any) => void;
   _handler?: Handler;
 }
 type CalculateGN<Gen extends GEN, Removed> = Gen extends GEN<infer A, infer B>
@@ -85,6 +85,7 @@ function makeHandlerFrame(gen: GEN, handler: Handler): GEN {
     const result = yield* gen;
     // eventually handles the return value
     if (handler.return) {
+      console.log('returned')
       return yield* handler.return(result);
     }
     return result;
@@ -133,7 +134,7 @@ function performOp(type: string, data: any, performGen: GEN) {
       resumeGenerator(performGen, value);
     });
   });    
-  
+
   // will return to the parent of withHandler
   activatedHandlerGen._return = handlersAndAfterReturnGen._return;
   resumeGenerator(activatedHandlerGen, null);

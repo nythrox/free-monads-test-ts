@@ -207,8 +207,8 @@ export function withWait<G extends GEN, Milliseconds extends number>(
     //     return val;
     //   },
     *wait(data: { milliseconds: number }, cont) {
-      yield* toGenStar((parent: GEN, onDone) => {
-        setTimeout(() => resume(parent, undefined, onDone), data.milliseconds);
+      yield* toGenStar((parent: GEN) => {
+        setTimeout(() => resume(parent, undefined), data.milliseconds);
       });
       return yield* cont();
     },
@@ -218,9 +218,9 @@ export function withWait<G extends GEN, Milliseconds extends number>(
 export function async<G extends GEN, V>(comp: G) {
   return withHandler<G, Async<V>>(comp, {
     *resolve(data: { promise: Promise<V> }, cont) {
-      yield (parent: GEN, onDone) => {
+      yield (parent: GEN) => {
         data.promise.then((val) => {
-          resume(parent, val, onDone);
+          resume(parent, val);
         });
       };
       return yield* cont();
@@ -265,25 +265,20 @@ function* hey() {
 }
 function* testmulti() {
   const res = yield* withHandler(
-    withHandler(
-      (function* () {
-        yield* hey();
-      })(),
-      {
-        *return(val) {
-          return [val, ''];
-        },
-        *hi1(num, k) {
-          const [res, acc] = yield* k(num);
-          return [res, num + acc];
-        },
-        *hi2(num, k) {
-          const [res, acc] = yield* k(num);
-          // return "(hi2 " + res + ")";
-          return [res, num + acc];
-        },
+    withHandler(hey(), {
+      *return(val) {
+        return [val, ''];
       },
-    ),
+      *hi1(num, k) {
+        const [res, acc] = yield* k(num);
+        return [res, num + acc];
+      },
+      *hi2(num, k) {
+        const [res, acc] = yield* k(num);
+        // return "(hi2 " + res + ")";
+        return [res, num + acc];
+      },
+    }),
     {
       *return(val) {
         return val.join('');
