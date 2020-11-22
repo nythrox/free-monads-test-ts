@@ -1,78 +1,111 @@
-interface Effect<K extends PropertyKey = any, V = any, R = any> {
-    key: K;
-    value: V;
-    __return: R;
-  }
-  interface EffectCall<R, E extends Effect, E2 extends Effect = never>
-    extends Syntax<R, E> {
-    _R: R;
-    _E: E;
-    effect: E;
-    callback: (result: E["__return"]) => Syntax<R, E2>;
-    type: "effectCall";
-  }
-  interface Done<R, E extends Effect> extends Syntax<R, E> {
-    _R: R;
-    _E: E;
-    value: R;
-    type: "done";
-  }
-  // goes from A to R
-  interface Handler<R, E extends Effect, A = any, E2 extends Effect = never>
-    extends Syntax<R, E> {
-    _R: R;
-    _E: E;
-    handle: Syntax<A, E>;
-    handlers: Handlers<R, A, E, E2>;
-    type: "handler";
-  }
-  type Handlers<R, A, E extends Effect, E2 extends Effect = never> = {
-    return: (value: A) => Syntax<R, E2> | Syntax<R, never>; // hack to make 'any is not assignable to never' work. (never is not assignable to Effect<any,any,any>)
-  } & {
-    [P in E["key"]]: (
-      value: E["value"],
-      resume: Resume<E["__return"], R>
-    ) => Syntax<R, E2> | Syntax<R, never>;
-  };
-  
-  interface Resume<V, T> extends Effect<"@@internal@@/resume", V, T> {}
-  
-  interface Syntax<R, E extends Effect = never> {
-    _R: R;
-    _E: E;
-  }
-  const done = <T>(value: T) =>
-    (({ value, type: "done" } as any) as Syntax<T, never>);
-  
-  const handle = <A, E extends Effect, E2 extends Effect>(
-    handle: Syntax<A, E>
-  ) => <T>(handlers: Handlers<T, A, E, any>) =>
-    (({ type: "handler", handlers, handle } as any) as Syntax<T, E2>);
-  
-  const performEffect = <E extends Effect>(effect: E) => <T, E2 extends Effect>(
-    callback: (result: E["__return"]) => Syntax<T, E2>
-  ) => (({ type: "effectCall", callback, effect } as any) as Syntax<T, E>);
-  
-  const effect = <K extends PropertyKey, V, R>(key: K) => (value: V) =>
-    ({
-      key,
-      value
-    } as Effect<K, V, R>);
+import {
+    Effect,
+    effect,
+    handle,
+    performEffect,
+    done,
+    Syntax,
+    isDone,
+    isEffectCall,
+    isHandler,
+    HandleEffect
+  } from "./core";
   interface ConsoleLog extends Effect<"ConsoleLog", string, void> {}
-  const ConsoleLog: (val: string) => ConsoleLog = effect<
-    "ConsoleLog",
-    string,
-    void
-  >("ConsoleLog");
+  const ConsoleLog = (val: string) =>
+    effect<"ConsoleLog", string, void>("ConsoleLog", val) as ConsoleLog;
+  
   const program = handle(
-    performEffect(ConsoleLog("hello world"))(() => done("printed hello world"))
-  )({
-    return(e) {
-      // return done([e]);
-      return done([e]) as Syntax<string[], ConsoleLog>;
+    "ConsoleLog",
+    performEffect(ConsoleLog("hello world"), () => done("printed hello world")),
+    (e) => {
+      return done([e]);
+      // return done([e]) as Syntax<string[], ConsoleLog>;
     },
-    ConsoleLog(log) {
+    (log, resume) => {
+      console.log(log);
+      // return performEffect(resume(), (res) =>
+      //   performEffect(resume(), () => done([res + res]))
+      // )
+      // return performEffect(resume(), (res) => done(res));
       return done([log]);
     }
-  });
+  );
+  
+  type then<R = any> = (val: R) => void;
+  type HandlerList = [
+    PropertyKey,
+    HandleEffect<any, any, any>,
+    (res: any, continueHandler: (val: any, afterHandler: then) => void) => void
+  ][];
+  const pop = <T>(a: T[]) => a.slice(0, a.length - 1);
+  const last = <T>(a: T[]) => a[a.length - 1];
+  const findHandler = (
+    k: PropertyKey,
+    a: HandlerList
+  ): [HandlerList[number][1], HandlerList[number][2]] => {
+    const l = last(a);
+    if (!l) throw new Error("Handler not found");
+    const [key, handler, next] = l;
+    if (key === k) {
+      return [handler, next];
+    }
+    return findHandler(k, a);
+  };
+  function runProgram<R>(
+    program: Syntax<R, never>,
+    then: then<R>,
+    handlers: HandlerList = []
+  ): void {
+    if (isDone(program)) {
+      then(program.value);
+    } else if (isEffectCall(program)) {
+      if (program.effect.key === "@@internal@@/resume") {
+        const {
+          program: handledProgram,
+          gotHandlerValue,
+          resumeValue
+        } = program.effect.value;
+        const resumed = handledProgram.callback(resumeValue);
+        runProgram(resumed, (doneValue) => {
+          gotHandlerValue(doneValue, (result, den) => {
+            const res = program.callback(result);
+            runProgram(res, den);
+          });
+        });
+      } else {
+        const effectCall = program;
+        const [handler, gotHandlerValue] = findHandler(
+          effectCall.effect.key,
+          handlers
+        );
+        const syntax = handler(program.effect.value, (resumeValue) =>
+          effect("@@internal@@/resume", { resumeValue, gotHandlerValue, program })
+        );
+        runProgram(syntax as any, then, pop(handlers));
+      }
+    } else if (isHandler(program)) {
+      const onRes = (
+        res: any,
+        continueHandler: (val: any, afterHandler: then) => void
+      ) => {
+        const transformed = program.handleReturn(res);
+        runProgram(
+          transformed,
+          (val) => continueHandler(val, then),
+          pop(handlers)
+        );
+      };
+      handlers.push([program.handleKey, program.handleEffect, onRes]);
+      runProgram(
+        program.handle as any,
+        then /* will only be called directly if there are no effect calls */,
+        handlers
+      );
+    } else
+      throw Error(
+        `Invalid instruction! Received: ${program} and expected an (Effect Call | Handler | Done).`
+      );
+  }
+  
+  runProgram(program, (res) => console.log("FINISHED RUNNING PROGRAM: ", res));
   
