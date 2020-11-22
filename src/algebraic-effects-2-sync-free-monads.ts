@@ -6,12 +6,12 @@ interface Effect<P extends PropertyKey = any, V = any, R = any> {
 
 interface Pure<R> {
   value: R;
-  type: "pure";
+  type: 'pure';
 }
 interface Chain<R, E extends Effect> {
   effect: E;
-  type: "chain";
-  then: (val: E["__returnWith"]) => FEM<R, E>;
+  type: 'chain';
+  then: (val: E['__returnWith']) => FEM<R, E>;
 }
 interface Handle<
   P extends PropertyKey,
@@ -20,7 +20,7 @@ interface Handle<
   R,
   R2
 > {
-  type: "handle";
+  type: 'handle';
   handlers: GetScopedHandlers<P, E, E2, R, R2>;
   handle: FEM<R, E>;
 }
@@ -49,36 +49,36 @@ const Handle = <
   R2
 >(
   program: FEM<R, E>,
-  handlers: GetScopedHandlers<P, E, E2, R, R2>
+  handlers: GetScopedHandlers<P, E, E2, R, R2>,
 ) => {
   return ({
     handle: program,
     handlers,
-    type: "handle"
+    type: 'handle',
   } as any) as FEM<R2, E>;
 };
 
 type FEM<R, E extends Effect> = Chain<R, E> | Pure<R> | Handle<any, E, R, R>;
 const Chain = <E extends Effect, R, E2 extends Effect>(
   effect: E,
-  then: (val: E["__returnWith"]) => FEM<R, E2>
+  then: (val: E['__returnWith']) => FEM<R, E2>,
 ) =>
   ({
     effect,
     then,
-    type: "chain"
+    type: 'chain',
   } as FEM<R, E | E2>);
-const Pure = <R, E = never>(value: R) => ({ value, type: "pure" } as FEM<R, E>);
+const Pure = <R, E = never>(value: R) => ({ value, type: 'pure' } as FEM<R, E>);
 const Effect = <P extends PropertyKey, T, R>(name: P, value: T) =>
   ({ name, value } as Effect<P, T, R>);
-interface Length extends Effect<"length", string, number> {}
-const Length = (string: string) => Effect("length", string) as Length;
-interface PlusOne extends Effect<"plusOne", number, number> {}
-const PlusOne = (num: number) => Effect("plusOne", num) as PlusOne;
+interface Length extends Effect<'length', string, number> {}
+const Length = (string: string) => Effect('length', string) as Length;
+interface PlusOne extends Effect<'plusOne', number, number> {}
+const PlusOne = (num: number) => Effect('plusOne', num) as PlusOne;
 
 type GetHandlers<
   Effects extends Effect,
-  Keys extends PropertyKey = Effects["name"]
+  Keys extends PropertyKey = Effects['name']
 > = {
   [Key in Keys]: Effects extends Effect<infer K, infer V, infer R>
     ? K extends Key
@@ -91,7 +91,7 @@ type HANDLERS = Record<PropertyKey, HANDLER>;
 type HANDLER = (
   val: any,
   k: (val: any, next: (val: any) => void) => void,
-  next: (val: FEM<any, any>) => void
+  next: (val: FEM<any, any>) => void,
 ) => void;
 type K = (val: any) => any;
 const last = (arr: any[]) => arr[arr.length - 1];
@@ -107,23 +107,23 @@ const findHandler = (key: PropertyKey, arr: any[]): HANDLER =>
 const interpret = <R, Effects extends Effect>(
   program: FEM<R, Effects>,
   handlers: HANDLERS[] = [],
-  next: (val: R) => void
+  next: (val: R) => void,
   // handlers: NoInfer<EffectsToKeys>
 ): void => {
-  if (program.type === "handle") {
+  if (program.type === 'handle') {
     interpret(program.handle, [...handlers, program.handlers], next);
     return;
-  } else if (program.type === "chain") {
+  } else if (program.type === 'chain') {
     const handler = findHandler(program.effect.name, handlers);
     if (!handler) {
-      throw new Error("Handler not found for: " + program.effect.name);
+      throw new Error('Handler not found for: ' + program.effect.name);
     }
     handler(
       program.effect.value,
       (val, _next) => void interpret(program.then(val), handlers, _next),
       // on done
       (res) => void interpret(res, minusLast(handlers), next),
-      minusLast(handlers)
+      minusLast(handlers),
     );
     return;
   } else {
@@ -168,31 +168,29 @@ const interpret = <R, Effects extends Effect>(
 
 const main2 = Handle(
   Handle(
-    Chain(Effect("test1", "hi0"), (hi0) =>
-      Chain(Effect("test0", "hi1"), (hi1) =>
-        Chain(Effect("test0", "hi0"), (hi3) => Pure(hi0 + hi1 + hi3))
-      )
+    Chain(Effect('test1', 'hi0'), (hi0) =>
+      Chain(Effect('test0', 'hi1'), (hi1) =>
+        Chain(Effect('test0', 'hi0'), (hi3) => Pure(hi0 + hi1 + hi3)),
+      ),
     ),
     {
       test0(val, k, then) {
         k(val, (res) => {
-          then(Pure("~" + res + "~"));
+          then(Pure('~' + res + '~'));
         });
-      }
-    }
+      },
+    },
   ),
   {
     test1(val, k, then) {
       k(val, (res) => {
-        then(Pure("(" + res + ")"));
+        then(Pure('(' + res + ')'));
       });
-    }
-  }
+    },
+  },
 );
 
 interpret(main2, [], console.log);
-
-
 
 function clonableIterator(it: (...args: any[]) => Generator, history = []) {
   return (...args: any[]) => {
@@ -209,7 +207,7 @@ function clonableIterator(it: (...args: any[]) => Generator, history = []) {
       },
       [Symbol.iterator]() {
         return this;
-      }
+      },
     };
   };
 }
@@ -278,12 +276,12 @@ type NoInfer<T> = [T][T extends any ? 0 : never];
 
 //todo tommorow: fix type async/multishot effects, cps style
 function genToObjs<R, E extends Effect<any, any>>(
-  fun: () => Generator<E, R, never>
+  fun: () => Generator<E, R, never>,
 ): FEM<R, E extends FEM<any, infer U> ? U : never> {
   const iterator = clonableIterator(fun)();
   const state = iterator.next(undefined);
   function run(
-    state: IteratorYieldResult<E> | IteratorReturnResult<R>
+    state: IteratorYieldResult<E> | IteratorReturnResult<R>,
   ): FEM<R, any> {
     if (state.done) {
       return Pure(state.value);
@@ -300,7 +298,7 @@ function genToObjs<R, E extends Effect<any, any>>(
 }
 const res = genToObjs(function* () {
   const plusOne = yield PlusOne(1);
-  const length = yield Length("123");
+  const length = yield Length('123');
   return [length, plusOne];
 });
 
@@ -339,9 +337,3 @@ const res = genToObjs(function* () {
 //   [],
 //   (sla) => console.log("done", sla)
 // );
-
-console.log(res);
-const v2 = res.clone();
-console.log(v2);
-// console.log(res.then(10));
-// console.log(res.then(11));

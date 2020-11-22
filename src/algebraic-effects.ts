@@ -132,7 +132,9 @@ function performOp(type: string, data: any, performGen: GEN) {
       handlersAndAfterReturnGen._return = activatedHandlerGen;
       resumeGenerator(performGen, value);
     });
-  });
+  });    
+  
+  // will return to the parent of withHandler
   activatedHandlerGen._return = handlersAndAfterReturnGen._return;
   resumeGenerator(activatedHandlerGen, null);
 }
