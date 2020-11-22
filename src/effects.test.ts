@@ -121,43 +121,43 @@ function* hello() {
   return res2;
 }
 describe('Effects', () => {
-  it('should work', () => {
-    start(withLog(main()), (val) => {
-      console.log('done', val);
-    });
-  });
-  it('should have state', () => {
-    start(withLog(state('not jason', mainState())), (done) =>
-      console.log('done:', done),
-    );
-  });
-  it('should wait 500 milliseconds before printing', (finish) => {
-    const programWaitHandled = withWait(mainWait());
-    const programLogHandled = withLog(programWaitHandled);
-    const programAsyncHandled = async(programLogHandled);
-    start(programAsyncHandled, (done) => {
-      console.log('done: ', done);
-      finish();
-    });
-  });
-  it('should log reversed', () => {
-    const program = logTest();
-    const programLogHandled = withHandler(program, {
-      *log(data: { args: any[]; method: 'log' }, cont) {
-        const res = yield* cont();
-        console.log(...data.args);
-        // return res;
-      },
-    });
-    start(programLogHandled, () => {});
-  });
-  it('should concat the msgs', () => {
-    const program = hello();
-    start(program, (res) => {
-      expect(res).toBe('plusOne: 234Hello worldHello worldHello world');
-      console.log(res);
-    });
-  });
+  // it('should work', () => {
+  //   start(withLog(main()), (val) => {
+  //     console.log('done', val);
+  //   });
+  // });
+  // it('should have state', () => {
+  //   start(withLog(state('not jason', mainState())), (done) =>
+  //     console.log('done:', done),
+  //   );
+  // });
+  // it('should wait 500 milliseconds before printing', (finish) => {
+  //   const programWaitHandled = withWait(mainWait());
+  //   const programLogHandled = withLog(programWaitHandled);
+  //   const programAsyncHandled = async(programLogHandled);
+  //   start(programAsyncHandled, (done) => {
+  //     console.log('done: ', done);
+  //     finish();
+  //   });
+  // });
+  // it('should log reversed', () => {
+  //   const program = logTest();
+  //   const programLogHandled = withHandler(program, {
+  //     *log(data: { args: any[]; method: 'log' }, cont) {
+  //       const res = yield* cont();
+  //       console.log(...data.args);
+  //       // return res;
+  //     },
+  //   });
+  //   start(programLogHandled, () => {});
+  // });
+  // it('should concat the msgs', () => {
+  //   const program = hello();
+  //   start(program, (res) => {
+  //     expect(res).toBe('plusOne: 234Hello worldHello worldHello world');
+  //     console.log(res);
+  //   });
+  // });
   it('should be wrong', () => {
     const program = testmulti();
     start(program, console.log);
