@@ -1,19 +1,109 @@
-import {
-    Effect,
-    createEffect,
-    handle,
-    performEffect,
-    done,
-    Syntax,
-    isDone,
-    isEffectCall,
-    isHandler,
-    HandleEffect,
-    resumeKey,
-    Resume,
-    HandleReturn
-  } from "./core";
-  
+import { HandlerList } from "./index";
+export interface Effect<K extends PropertyKey = any, V = any, R = any> {
+  key: K;
+  value: V;
+  __return: R;
+}
+
+export interface EffectCall<R, E extends Effect, E2 extends Effect = never>
+  extends Syntax<R, E> {
+  _R: R;
+  _E: E;
+  effect: E;
+  programThen: (result: E["__return"]) => Syntax<R, E2>;
+  type: "effectCall";
+}
+
+export function isEffectCall(val: any): val is EffectCall<any, any> {
+  return val.type === "effectCall";
+}
+
+export interface Done<R, E extends Effect> extends Syntax<R, E> {
+  _R: R;
+  _E: E;
+  value: R;
+  type: "done";
+}
+
+export function isDone(val: any): val is Done<any, any> {
+  return val.type === "done";
+}
+// goes from A to R
+export interface Handler<
+  R,
+  E extends Effect,
+  A,
+  E2 extends Effect = never,
+  E3 extends Effect = never
+> extends Syntax<R, E> {
+  _R: R;
+  _E: E;
+  handleKey: E["key"];
+  program: Syntax<A, E>;
+  handleReturn: HandleReturn<A, R, E2>;
+  handleEffect: HandleEffect<E, R, E3>;
+  type: "handler";
+}
+export type HandleReturn<A, R, E extends Effect> = (val: A) => Syntax<R, E>;
+export type HandleEffect<E extends Effect, R, E2 extends Effect> = (
+  val: E["value"],
+  resume: (val: E["__return"]) => Resume<E["__return"], R>
+) => Syntax<R, E2>;
+export function isHandler(val: any): val is Handler<any, any, any> {
+  return val.type === "handler";
+}
+
+export const resumeKey = Symbol("@@internal@@/resume");
+export type NoInfer<T> = [T][T extends any ? 0 : never];
+export interface Resume<V, T>
+  extends Effect<
+    typeof resumeKey,
+    {
+      handlerFrame: HandlerList[number];
+      value: V;
+      programThen: (val: V) => Syntax<any>;
+    },
+    T
+  > {}
+
+export interface Syntax<R, E extends Effect = never> {
+  _R: R;
+  _E: E;
+}
+export const done = <T>(value: T) =>
+  (({ value, type: "done" } as any) as Syntax<T, never>);
+
+export const handle = <
+  A,
+  T,
+  E extends Effect,
+  E2 extends Effect,
+  E3 extends Effect
+>(
+  handleKey: E["key"],
+  program: Syntax<A, E>,
+  handleReturn: HandleReturn<A, T, E2>,
+  handleEffect: HandleEffect<E, T, E3>
+) =>
+  (({
+    handleKey,
+    type: "handler",
+    handleReturn,
+    handleEffect,
+    program
+  } as any) as Syntax<T, E2>);
+
+export const performEffect = <E extends Effect, T, E2 extends Effect>(
+  effect: E,
+  programThen: (result: E["__return"]) => Syntax<T, E2>
+) => (({ type: "effectCall", programThen, effect } as any) as Syntax<T, E>);
+
+export const createEffect = <K extends PropertyKey, V, R>(key: K, value: V) =>
+  ({
+    key,
+    value
+  } as Effect<K, V, R>);
+
   type then<R = any> = (val: R) => void;
   export type HandlerList = {
     key: PropertyKey;
