@@ -151,8 +151,12 @@ const program = handle(
 // run(program).then(console.log).catch(console.log);
 
 const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
-  performEffect(createEffect("test0", "hi1"), (hi1) =>
-    performEffect(createEffect("test1", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
+  performEffect(createEffect("test1", "hi1"), (hi1) =>
+    performEffect(createEffect("test1", "hi2"), (hi2) =>
+      performEffect(createEffect("test1", "hi3"), (hi3) =>
+        done(hi0 + hi1 + hi2 + hi3)
+      )
+    )
   )
 );
 const program2 = handle(
@@ -314,7 +318,12 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     console.log(handlerFrame.program);
     handlerFrame.program.prev = {
       _return(transformedVal) {
-        program._return(e);
+        const continueHandler = program.programThen(transformedVal);
+        continueHandler.prev = program;
+        continueHandler._return = (e) => {
+          continueHandler.prev._return(e);
+        };
+        runProgram(continueHandler, undefined, handlers);
       }
     };
     const continueMain = (mainProgram as EffectCall<any, any, any>).programThen(
