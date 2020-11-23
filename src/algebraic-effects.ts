@@ -129,7 +129,6 @@ function performOp(type: string, data: any, performGen: GEN) {
   const activatedHandlerGen = handlerFunc(data, function delimitedCont(value) {
     return toGenStar((_currentGen: GEN) => {
       // console.log(currentGen === activatedHandlerGen);
-      // handlersGen._return = currentGen;
       handlersAndAfterReturnGen._return = activatedHandlerGen;
       resumeGenerator(performGen, value);
     }); 
