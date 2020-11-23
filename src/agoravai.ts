@@ -183,7 +183,7 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       performEffect(resume(val), (res1) =>
         performEffect(resume(val), (res2) =>
           performEffect(resume(val), (res3) =>
-            done(`((${res1}) (${res2}) (${res3})) resumed`)
+            done(res1 + res2 + res3 + " resumed")
           )
         )
       )
@@ -290,25 +290,22 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       console.log("!!!handling resume", saved.toString());
       console.log(saved.owo);
       const programThenSyntax = programThen(resumeValue);
+      handlerFrame.beforeThen = (returnTransformValue) => {
+        // run effect handler program
+        const hnext = handlerProgramThen(returnTransformValue);
+        console.log("@hhh");
+        runProgram(
+          hnext,
+          (e) => {
+            const next = handlerFrame.handleReturn(e);
+            // console.log(saved.toString());
+            runProgram(next, saved, handlers);
+          },
+          handlers
+        );
+      };
       // run actual program
-      runProgram(
-        programThenSyntax,
-        (returnTransformValue) => {
-          // run effect handler program
-          const hnext = handlerProgramThen(returnTransformValue);
-          console.log("@hhh");
-          runProgram(
-            hnext,
-            (e) => {
-              const next = handlerFrame.handleReturn(e);
-              // console.log(saved.toString());
-              runProgram(next, then, handlers);
-            },
-            handlers
-          );
-        },
-        handlers
-      );
+      runProgram(programThenSyntax, then, handlers);
     }
     return new Promise((resolve, reject) => {
       try {
