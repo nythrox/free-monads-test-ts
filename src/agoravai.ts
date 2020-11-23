@@ -137,39 +137,43 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       // return done([e]) as Syntax<string[], ConsoleLog>;
     },
     (log, resume) => {
-      return performEffect(resume(), (res) =>
-        performEffect(resume(), (res2) => done([...res, ...res2]))
-      );
+      return performEffect(resume(), (res) => {
+        console.log("hey!");
+        return performEffect(resume(), (res2) => {
+          console.log("hey2");
+          return done([...res, ...res2]);
+        });
+      });
       // return performEffect(resume(), (res) => done(res));
       // return done([log]);
     }
   );
-  // run(program).then(console.log).catch(console.log);
+  run(program).then(console.log).catch(console.log);
   
-  const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
-    performEffect(createEffect("test1", "hi1"), (hi1) =>
-      performEffect(createEffect("test0", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
-    )
-  );
-  const program2 = handle(
-    "test1" as never,
-    handle(
-      "test0",
-      dostuff,
-      (e) => done(e),
-      (val, resume) => {
-        console.log("performed test0");
-        return performEffect(resume(val), (res) => done("~" + res + "~"));
-      }
-    ),
-    (e) => done(e),
-    (val, resume) => {
-      console.log("performed test1");
-      return performEffect(resume(val), (res) => done("(" + res + ")"));
-    }
-  );
+  // const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
+  //   performEffect(createEffect("test0", "hi1"), (hi1) =>
+  //     performEffect(createEffect("test1", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
+  //   )
+  // );
+  // const program2 = handle(
+  //   "test1" as never,
+  //   handle(
+  //     "test0",
+  //     dostuff,
+  //     (e) => done(e),
+  //     (val, resume) => {
+  //       console.log("performed test0");
+  //       return performEffect(resume(val), (res) => done("~" + res + "~"));
+  //     }
+  //   ),
+  //   (e) => done(e),
+  //   (val, resume) => {
+  //     console.log("performed test1");
+  //     return performEffect(resume(val), (res) => done("(" + res + ")"));
+  //   }
+  // );
   
-  run(program2).then(console.log).catch(console.log);
+  // run(program2).then(console.log).catch(console.log);
   // run(
   //   handle(
   //     "test1",
@@ -230,16 +234,18 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const { handleEffect, handleReturn, program: handleProgram } = program;
       const handlerFrame = {
         handler: handleEffect,
-        key: program.handleKey
+        key: program.handleKey,
+        beforeThen: (val) => {
+          runProgram(handleReturn(val), (transformResult) => {
+            then(transformResult);
+          });
+        }
       };
       runProgram(
         handleProgram,
         // then will only be called here if the next program is a Handler or Pure
         (val) => {
-          // this value won't change, it's only here for sharing purposes
-          runProgram(handleReturn(val), (transformResult) => {
-            then(transformResult);
-          });
+          handlerFrame.beforeThen(val);
         },
         [...handlers, handlerFrame]
       );
@@ -260,24 +266,22 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       runProgram(handlerProgram, then, handlers);
     }
     function handleResumeEffect(
-      program: EffectCall<any, any, never>,
+      program: EffectCall<any, Resume<any, any>, never>,
       then: then<any>,
       handlers: HandlerList = []
     ) {
       const { effect, programThen: handlerProgramThen } = program;
-      const { key, value } = effect;
+      const { value } = effect;
       const { programThen, handlerFrame, value: resumeValue } = value;
       // programThen is actual program
       const programThenSyntax = programThen(resumeValue);
+      const saved = handlerFrame.beforeThen;
+      handlerFrame.beforeThen = (returnTransformValue) => {
+        // run effect handler program
+        runProgram(handlerProgramThen(returnTransformValue), saved, handlers);
+      };
       // run actual program
-      runProgram(
-        programThenSyntax,
-        (returnTransformValue) => {
-          // run effect handler program
-          runProgram(handlerProgramThen(returnTransformValue), then, handlers);
-        },
-        handlers
-      );
+      runProgram(programThenSyntax, then, handlers);
     }
     return new Promise((resolve, reject) => {
       try {
