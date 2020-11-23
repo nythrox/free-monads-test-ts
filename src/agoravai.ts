@@ -102,7 +102,7 @@ export const handle = <
     handleReturn,
     handleEffect,
     program
-  } as any) as Syntax<T, Remove<E, P> | E2> | Remove<E3, typeof resumeKey>);
+  } as any) as Syntax<T, Remove<E, P> | E2 | Remove<E3, typeof resumeKey>>);
 
 export const performEffect = <E extends Effect, T, E2 extends Effect>(
   effect: E,
@@ -126,7 +126,7 @@ const pop = <T>(a: T[]) => a.slice(0, a.length - 1);
 const last = <T>(a: T[]) => a[a.length - 1];
 const findHandler = (key: PropertyKey, a: HandlerList): HandlerList[number] => {
   const l = last(a);
-  if (!l) throw new Error("Handler not found");
+  if (!l) throw new Error("Handler not found: " + key.toString());
   if (key === l.key) {
     return l;
   }
@@ -189,7 +189,7 @@ const program2 = handle(
   ),
   (e) => done(e + "transformed1"),
   (val, resume) => {
-    // return performEffect(createEffect("test1", "hi3"), (res1) =>
+    // return performEffect(createEffect("test0", "hi3"), (res1) =>
     //   performEffect(resume(val), (res) =>
     //     done("~" + "[" + res1 + "]" + res + "~")
     //   )
@@ -230,29 +230,24 @@ function printNotovflr(value: any) {
 function run<R>(program: Syntax<R, never>): Promise<R> {
   function runProgram<R>(
     program: Syntax<R, any>,
-    then: undefined,
     handlers: HandlerList = []
   ): void {
     if (isDone(program)) {
-      handleDone(program, undefined, handlers);
+      handleDone(program, handlers);
     } else if (isHandler(program)) {
-      handleHandler(program, undefined, handlers);
+      handleHandler(program, handlers);
     } else if (isEffectCall(program)) {
       if (program.effect.key !== resumeKey) {
-        handleEffectCall(program, undefined, handlers);
+        handleEffectCall(program, handlers);
       } else {
-        handleResumeEffect(program, undefined, handlers);
+        handleResumeEffect(program, handlers);
       }
     } else
       throw Error(
         `Invalid instruction! Received: ${program} and expected an (Effect Call | Handler | Done).`
       );
   }
-  function handleDone(
-    program: Done<any, any>,
-    smh: undefined,
-    handlers: HandlerList = []
-  ) {
+  function handleDone(program: Done<any, any>, handlers: HandlerList = []) {
     if (printNotovflr(program.value)) {
       // console.log("calling done from actually done", program.value);
       program._return(program.value);
@@ -263,7 +258,6 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
   }
   function handleHandler(
     program: Handler<any, any, any, any>,
-    then: undefined,
     handlers: HandlerList = []
   ) {
     const { handleEffect, handleReturn, program: handleProgram } = program;
@@ -279,22 +273,16 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       transformedSyntax._return = (e) => {
         transformedSyntax.prev._return(e);
       };
-      runProgram(transformedSyntax, undefined, handlers);
+      runProgram(transformedSyntax, handlers);
     };
-    runProgram(
-      handleProgram,
-      // then will only be called here if the next program is a Handler or Pure
-      undefined,
-      [...handlers, handlerFrame]
-    );
+    runProgram(handleProgram, [...handlers, handlerFrame]);
   }
 
   function handleEffectCall(
     program: EffectCall<any, any, never>,
-    then: undefined,
     handlers: HandlerList = []
   ) {
-    const { effect, programThen } = program;
+    const { effect } = program;
     const { key, value } = effect;
     const handlerFrame = findHandler(key, handlers);
     const activatedHandlerProgram = handlerFrame.handler(value, (value) =>
@@ -308,11 +296,10 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     activatedHandlerProgram._return = (e) => {
       activatedHandlerProgram.prev._return(e);
     };
-    runProgram(activatedHandlerProgram, undefined, handlers);
+    runProgram(activatedHandlerProgram, handlers);
   }
   function handleResumeEffect(
     program: EffectCall<any, Resume<any, any>, never>,
-    then: undefined,
     handlers: HandlerList = []
   ) {
     // program being passed is EffectCall(resumeProgram, { mainProgram, activatedHandlerProgram, handlerFrame })
@@ -324,7 +311,6 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       mainProgram
       // activatedHandlerProgram,
     } = value;
-    console.log(handlerFrame.program);
     handlerFrame.program.prev = {
       _return(transformedVal) {
         const continueHandler = program.programThen(transformedVal);
@@ -332,7 +318,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
         continueHandler._return = (e) => {
           continueHandler.prev._return(e);
         };
-        runProgram(continueHandler, undefined, handlers);
+        runProgram(continueHandler, handlers);
       }
     } as Syntax<any, any>;
     const continueMain = (mainProgram as EffectCall<any, any, any>).programThen(
@@ -342,12 +328,12 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     continueMain._return = (e) => {
       continueMain.prev._return(e);
     };
-    runProgram(continueMain, undefined, handlers);
+    runProgram(continueMain, handlers);
   }
   return new Promise((resolve, reject) => {
     try {
       program._return = resolve;
-      runProgram(program, undefined, []);
+      runProgram(program, []);
     } catch (e) {
       // handler not found
       reject(e);
