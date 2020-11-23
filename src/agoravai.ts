@@ -1,4 +1,3 @@
-import { HandlerList } from "./index";
 export interface Effect<K extends PropertyKey = any, V = any, R = any> {
   key: K;
   value: V;
@@ -104,12 +103,12 @@ export const createEffect = <K extends PropertyKey, V, R>(key: K, value: V) =>
     value
   } as Effect<K, V, R>);
 
-  type then<R = any> = (val: R) => void;
+  export type then<R = any> = (val: R) => void;
   export type HandlerList = {
     key: PropertyKey;
     handler: HandleEffect<any, any, any>;
-    return: HandleReturn<any, any, any>;
-    then: then;
+    returnTo: then;
+    return: then;
   }[];
   const pop = <T>(a: T[]) => a.slice(0, a.length - 1);
   const last = <T>(a: T[]) => a[a.length - 1];
@@ -124,23 +123,27 @@ export const createEffect = <K extends PropertyKey, V, R>(key: K, value: V) =>
   interface ConsoleLog extends Effect<"ConsoleLog", string, void> {}
   const ConsoleLog = (val: string) =>
     createEffect<"ConsoleLog", string, void>("ConsoleLog", val) as ConsoleLog;
+  const per = performEffect(ConsoleLog("hello world"), () =>
+    done("printed hello world")
+  );
+  const dndper = done("didnt print hello world");
+  const program = handle(
+    "ConsoleLog",
+    per,
+    (e) => {
+      return done([e]);
+      // return done([e]) as Syntax<string[], ConsoleLog>;
+    },
+    (log, resume) => {
+      return performEffect(resume(), (res) =>
+        performEffect(resume(), (res2) => done([...res, ...res2]))
+      );
+      // return performEffect(resume(), (res) => done(res));
+      // return done([log]);
+    }
+  );
+  // run(program).then(console.log).catch(console.log);
   
-  // const program = handle(
-  //   "ConsoleLog",
-  //   performEffect(ConsoleLog("hello world"), () => done("printed hello world")),
-  //   (e) => {
-  //     return done([e]);
-  //     // return done([e]) as Syntax<string[], ConsoleLog>;
-  //   },
-  //   (log, resume) => {
-  //     console.log(log);
-  //     // return performEffect(resume(), (res) =>
-  //     //   performEffect(resume(), (res2) => done([...res, ...res2]))
-  //     // );
-  //     return performEffect(resume(), (res) => done(res));
-  //     // return done([log]);
-  //   }
-  // );
   const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
     performEffect(createEffect("test0", "hi1"), (hi1) =>
       performEffect(createEffect("test1", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
@@ -192,51 +195,47 @@ export const createEffect = <K extends PropertyKey, V, R>(key: K, value: V) =>
           const handlerProgram = handlerFrame.handler(value, (value) =>
             createEffect(resumeKey, { handlerFrame, value, programThen })
           );
-          runProgram(handlerProgram, handlerFrame.then, handlers);
+          // skip return transformer
+          // const saved = handlerFrame.return;
+          // handlerFrame.return = then
+          runProgram(handlerProgram, handlerFrame.returnTo, handlers);
         } else {
           const { value } = effect as Resume<any, any>;
           const { programThen, handlerFrame, value: resumeValue } = value;
+          handlerFrame.returnTo = (returnTransformValue) => {
+            // run effect handler program
+            // console.log("being called with", returnTransformValue);
+            // then("abc");
+            runProgram(program.programThen(returnTransformValue), then, handlers);
+          };
+          // console.log("--set returnTo");
           // programThen is actual program
           const programThenSyntax = programThen(resumeValue);
-          console.log("c", count++);
           // run actual program
-          runProgram(
-            programThenSyntax,
-            (mainProgramDoneVal) => {
-              // after getting the program result, run the transformation
-              runProgram(
-                handlerFrame.return(mainProgramDoneVal),
-                (transformedVal) => {
-                  // after getting the transformed result, resume the handler program
-                  const handlerProgramSyntax = program.programThen(
-                    transformedVal
-                  );
-                  console.log("trams", transformedVal);
-                  console.log("then", handlerFrame.then.toString());
-                  // after finishing the handler program, retunr to the original then()
-                  runProgram(
-                    handlerProgramSyntax,
-                    handlerFrame.then,
-                    pop(handlers)
-                  );
-                },
-                pop(handlers)
-              );
-            },
-            handlers
-          );
+          runProgram(programThenSyntax, handlerFrame.return, handlers);
         }
       } else if (isHandler(program)) {
         const { handleEffect, handleReturn, program: handleProgram } = program;
         const handlerFrame = {
           handler: handleEffect,
-          return: handleReturn,
-          key: program.handleKey,
-          then
+          returnTo: then,
+          return: (val) => {
+            // this value won't change, it's only here for sharing purposes
+            runProgram(handleReturn(val), (transformResult) => {
+              // console.log(
+              //   "-getting returnTo",
+              //   program.handleKey,
+              //   "returning with",
+              //   transformResult
+              // );
+              handlerFrame.returnTo(transformResult);
+            });
+          },
+          key: program.handleKey
         };
         runProgram(
           handleProgram,
-          then, // then will only be called here if the next program is a Handler or Pure
+          (e) => handlerFrame.return(e), // then will only be called here if the next program is a Handler or Pure
           // (done) => {
           //   runProgram(handleReturn(done), handlerFrame.then);
           // },
