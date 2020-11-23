@@ -137,47 +137,47 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       // return done([e]) as Syntax<string[], ConsoleLog>;
     },
     (log, resume) => {
-      return performEffect(resume(), (res) => {
-        console.log("hey!");
-        return performEffect(resume(), (res2) => {
-          console.log("hey2");
-          return done([...res, ...res2]);
-        });
-      });
-      // return performEffect(resume(), (res) => done(res));
+      // return performEffect(resume(), (res) => {
+      //   console.log("hey!");
+      //   return performEffect(resume(), (res2) => {
+      //     console.log("hey2");
+      //     return done([...res, ...res2]);
+      //   });
+      // });
+      return performEffect(resume(), (res) => done(res));
       // return done([log]);
     }
   );
   run(program).then(console.log).catch(console.log);
   
-  // const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
-  //   performEffect(createEffect("test1", "hi1"), (hi1) =>
-  //     performEffect(createEffect("test0", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
-  //   )
-  // );
-  // const program2 = handle(
-  //   "test1" as never,
-  //   handle(
-  //     "test0",
-  //     dostuff,
-  //     (e) => done(e),
-  //     (val, resume) => {
-  //       console.log("performed test0");
-  //       return performEffect(resume(val), (res) => done("~" + res + "~"));
-  //     }
-  //   ),
-  //   (e) => done(e),
-  //   (val, resume) => {
-  //     console.log("performed test1");
-  //     return performEffect(resume(val), (res) => done("(" + res + ")"));
-  //   }
-  // );
+  const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
+    performEffect(createEffect("test1", "hi1"), (hi1) =>
+      performEffect(createEffect("test0", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
+    )
+  );
+  const program2 = handle(
+    "test1" as never,
+    handle(
+      "test0",
+      dostuff,
+      (e) => done(e),
+      (val, resume) => {
+        console.log("performed test0");
+        return performEffect(resume(val), (res) => done("~" + res + "~"));
+      }
+    ),
+    (e) => done(e),
+    (val, resume) => {
+      console.log("performed test1");
+      return performEffect(resume(val), (res) => done("(" + res + ")"));
+    }
+  );
   
   // run(program2).then(console.log).catch(console.log);
   
   function printNotovflr(value) {
     count++;
-    if (count < 8) {
+    if (count < 100) {
       console.log("log", value);
       return true;
     }
@@ -225,7 +225,7 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const handlerFrame = {
         handler: handleEffect,
         key: program.handleKey,
-        origTransform: handleReturn,
+        handleReturn: handleReturn,
         transform: handleReturn,
         beforeThen: (val) => {
           runProgram(handlerFrame.transform(val), (transformResult) => {
@@ -254,8 +254,8 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const handlerProgram = handlerFrame.handler(value, (value) =>
         createEffect(resumeKey, { handlerFrame, value, programThen })
       );
-      handlerFrame.transform = (e) => done(e);
       // skip return transformer
+      handlerFrame.transform = (e) => done(e);
       runProgram(handlerProgram, then, handlers);
     }
     function handleResumeEffect(
@@ -267,14 +267,14 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const { value } = effect;
       const { programThen, handlerFrame, value: resumeValue } = value;
       // programThen is actual program
-      const programThenSyntax = programThen(resumeValue);
       const saved = handlerFrame.beforeThen;
+      const programThenSyntax = programThen(resumeValue);
       handlerFrame.beforeThen = (returnTransformValue) => {
         // run effect handler program
         runProgram(
           handlerProgramThen(returnTransformValue),
           (e) => {
-            runProgram(handlerFrame.origTransform(e), saved, handlers);
+            runProgram(handlerFrame.handleReturn(e), saved, handlers);
           },
           handlers
         );
