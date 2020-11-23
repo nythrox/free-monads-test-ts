@@ -63,7 +63,7 @@ export interface Resume<V, T>
     {
       handlerFrame: HandlerList[number];
       value: V;
-      mainProgram: Syntax<any, any>;
+      mainProgram: EffectCall<any, any, any>;
     },
     T
   > {}
@@ -165,13 +165,12 @@ const test1 = (msg: string) =>
   createEffect<"test1", string, string>("test1", msg);
 
 const dostuff = performEffect(test0("hi0"), (hi0) =>
-  performEffect(test1("hi1"), (hi1) =>
+  performEffect(test0("hi1"), (hi1) =>
     performEffect(test1("hi2"), (hi2) =>
       performEffect(test1("hi3"), (hi3) => done(hi0 + hi1 + hi2 + hi3))
     )
   )
 );
-
 const program2 = handle(
   "test1",
   handle(
@@ -203,12 +202,12 @@ run(program2).then(console.log).catch(console.log);
 const singleprogrammulti = handle(
   "smh",
   performEffect(createEffect("smh", "hi"), (res) => done(res + " done")),
-  (val) => done(val + " return"),
+  (val) => done("(r " + val + " r)"),
   (val, resume) =>
     performEffect(resume(val), (res1) =>
       performEffect(resume(val), (res2) =>
         performEffect(resume(val), (res3) =>
-          done(res1 + res2 + res3 + " resumed")
+          done(res1 + res2 + res3 + " resumed! :)")
         )
       )
     )
@@ -270,9 +269,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     handleProgram._return = (e) => {
       const transformedSyntax = handleReturn(e);
       transformedSyntax.prev = handleProgram.prev;
-      transformedSyntax._return = (e) => {
-        transformedSyntax.prev._return(e);
-      };
+      transformedSyntax._return = handleProgram.prev._return;
       runProgram(transformedSyntax, handlers);
     };
     runProgram(handleProgram, [...handlers, handlerFrame]);
@@ -293,9 +290,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       })
     );
     activatedHandlerProgram.prev = handlerFrame.program.prev;
-    activatedHandlerProgram._return = (e) => {
-      activatedHandlerProgram.prev._return(e);
-    };
+    activatedHandlerProgram._return = activatedHandlerProgram.prev._return;
     runProgram(activatedHandlerProgram, handlers);
   }
   function handleResumeEffect(
@@ -305,29 +300,18 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     // program being passed is EffectCall(resumeProgram, { mainProgram, activatedHandlerProgram, handlerFrame })
     const { effect } = program;
     const { value } = effect;
-    const {
-      handlerFrame,
-      value: resumeValue,
-      mainProgram
-      // activatedHandlerProgram,
-    } = value;
+    const { handlerFrame, value: resumeValue, mainProgram } = value;
     handlerFrame.program.prev = {
       _return(transformedVal) {
         const continueHandler = program.programThen(transformedVal);
         continueHandler.prev = program;
-        continueHandler._return = (e) => {
-          continueHandler.prev._return(e);
-        };
+        continueHandler._return = continueHandler.prev._return;
         runProgram(continueHandler, handlers);
       }
     } as Syntax<any, any>;
-    const continueMain = (mainProgram as EffectCall<any, any, any>).programThen(
-      resumeValue
-    );
+    const continueMain = mainProgram.programThen(resumeValue);
     continueMain.prev = mainProgram;
-    continueMain._return = (e) => {
-      continueMain.prev._return(e);
-    };
+    continueMain._return = mainProgram._return;
     runProgram(continueMain, handlers);
   }
   return new Promise((resolve, reject) => {

@@ -291,3 +291,19 @@ function* testmulti() {
   );
   return res;
 }
+
+function* singleprogrammulti() {
+  return yield* withHandler(
+    (function* () {
+      yield* op('smh', 'hi');
+    })(),
+    {
+      *smh(msg, k) {
+        const res1 = yield* k(msg);
+        const res2 = yield* k(msg);
+        const res3 = yield* k(msg);
+        return res1 + res2 + res3 + ' resumed';
+      },
+    },
+  );
+}
