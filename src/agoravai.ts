@@ -1,3 +1,4 @@
+/* eslint-disable */
 export interface Effect<K extends PropertyKey = any, V = any, R = any> {
   key: K;
   value: V;
@@ -62,7 +63,7 @@ export interface Resume<V, T>
     {
       handlerFrame: HandlerList[number];
       value: V;
-      programThen: (val: V) => Syntax<any>;
+      mainProgram: Syntax<any, any>;
     },
     T
   > {}
@@ -70,18 +71,27 @@ export interface Resume<V, T>
 export interface Syntax<R, E extends Effect = never> {
   _R: R;
   _E: E;
+  prev: Syntax<any, any>;
+  _return: (val: R) => void;
 }
 export const done = <T>(value: T) =>
   (({ value, type: "done" } as any) as Syntax<T, never>);
+
+export type Remove<
+  T extends Effect,
+  RemoveValue extends PropertyKey
+> = T extends Effect<RemoveValue> ? never : T;
 
 export const handle = <
   A,
   T,
   E extends Effect,
-  E2 extends Effect,
-  E3 extends Effect
+  SLA extends PropertyKey = Effect["key"],
+  P extends SLA = any,
+  E2 extends Effect = any,
+  E3 extends Effect = any
 >(
-  handleKey: E["key"],
+  handleKey: P,
   program: Syntax<A, E>,
   handleReturn: HandleReturn<A, T, E2>,
   handleEffect: HandleEffect<E, T, E3>
@@ -92,12 +102,13 @@ export const handle = <
     handleReturn,
     handleEffect,
     program
-  } as any) as Syntax<T, E2>);
+  } as any) as Syntax<T, Remove<E, P> | E2> | Remove<E3, typeof resumeKey>);
 
 export const performEffect = <E extends Effect, T, E2 extends Effect>(
   effect: E,
   programThen: (result: E["__return"]) => Syntax<T, E2>
-) => (({ type: "effectCall", programThen, effect } as any) as Syntax<T, E>);
+) =>
+  (({ type: "effectCall", programThen, effect } as any) as Syntax<T, E | E2>);
 
 export const createEffect = <K extends PropertyKey, V, R>(key: K, value: V) =>
   ({
@@ -109,8 +120,7 @@ export type then<R = any> = (val: R) => void;
 export type HandlerList = {
   key: PropertyKey;
   handler: HandleEffect<any, any, any>;
-  // returnTo: then;
-  // return: then;
+  program: Syntax<any, any>;
 }[];
 const pop = <T>(a: T[]) => a.slice(0, a.length - 1);
 const last = <T>(a: T[]) => a[a.length - 1];
@@ -149,30 +159,41 @@ const program = handle(
   }
 );
 // run(program).then(console.log).catch(console.log);
+const test0 = (msg: string) =>
+  createEffect<"test0", string, string>("test0", msg);
+const test1 = (msg: string) =>
+  createEffect<"test1", string, string>("test1", msg);
 
-const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
-  performEffect(createEffect("test1", "hi1"), (hi1) =>
-    performEffect(createEffect("test1", "hi2"), (hi2) =>
-      performEffect(createEffect("test1", "hi3"), (hi3) =>
-        done(hi0 + hi1 + hi2 + hi3)
-      )
+const dostuff = performEffect(test0("hi0"), (hi0) =>
+  performEffect(test1("hi1"), (hi1) =>
+    performEffect(test1("hi2"), (hi2) =>
+      performEffect(test1("hi3"), (hi3) => done(hi0 + hi1 + hi2 + hi3))
     )
   )
 );
+
 const program2 = handle(
-  "test1" as never,
+  "test1",
   handle(
     "test0",
     dostuff,
     (e) => done(e + "transformed0"),
     (val, resume) => {
-      console.log("performed test0");
+      // return performEffect(createEffect("test1", "hi3"), (res1) =>
+      //   performEffect(resume(val), (res) =>
+      //     done("~" + "[" + res1 + "]" + res + "~")
+      //   )
+      // );
       return performEffect(resume(val), (res) => done("~" + res + "~"));
     }
   ),
   (e) => done(e + "transformed1"),
   (val, resume) => {
-    console.log("performed test1");
+    // return performEffect(createEffect("test1", "hi3"), (res1) =>
+    //   performEffect(resume(val), (res) =>
+    //     done("~" + "[" + res1 + "]" + res + "~")
+    //   )
+    // );
     return performEffect(resume(val), (res) => done("(" + res + ")"));
   }
 );
@@ -197,7 +218,7 @@ const singleprogrammulti = handle(
 
 // run(done(5)).then(console.log).catch(console.log);
 
-function printNotovflr(value) {
+function printNotovflr(value: any) {
   count++;
   if (count < 100) {
     // console.log("log", value);
@@ -234,16 +255,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
   ) {
     if (printNotovflr(program.value)) {
       // console.log("calling done from actually done", program.value);
-      if (program.postTransform) {
-        const syntax = program.postTransform(program.value);
-        syntax.prev = program;
-        syntax._return = (e) => {
-          syntax.prev._return(e);
-        };
-        runProgram(syntax, undefined, program.postTransform.handlers);
-      } else {
-        program._return(program.value);
-      }
+      program._return(program.value);
       // then(program.value);
     } else {
       console.log("!!!!!!overflow!!!!!!");
@@ -289,11 +301,9 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       createEffect(resumeKey, {
         handlerFrame,
         value,
-        mainProgram: program,
-        activatedHandlerProgram
+        mainProgram: program
       })
     );
-    activatedHandlerProgram.ahp = true;
     activatedHandlerProgram.prev = handlerFrame.program.prev;
     activatedHandlerProgram._return = (e) => {
       activatedHandlerProgram.prev._return(e);
@@ -311,9 +321,8 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     const {
       handlerFrame,
       value: resumeValue,
-      mainProgram,
+      mainProgram
       // activatedHandlerProgram,
-      handlerFrame
     } = value;
     console.log(handlerFrame.program);
     handlerFrame.program.prev = {
@@ -325,7 +334,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
         };
         runProgram(continueHandler, undefined, handlers);
       }
-    };
+    } as Syntax<any, any>;
     const continueMain = (mainProgram as EffectCall<any, any, any>).programThen(
       resumeValue
     );
@@ -337,14 +346,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
   }
   return new Promise((resolve, reject) => {
     try {
-      const ret = (e) => {
-        console.log("-----------DONE-----------");
-        resolve(e);
-      };
-      program._return = ret;
-      program.prev = {
-        _return: ret
-      };
+      program._return = resolve;
       runProgram(program, undefined, []);
     } catch (e) {
       // handler not found
