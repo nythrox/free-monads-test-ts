@@ -1,294 +1,171 @@
-export interface Effect<K extends PropertyKey = any, V = any, R = any> {
-  key: K;
-  value: V;
-  __return: R;
+import { Remove } from './effects.test';
+
+function isGenerator(x: any): x is GEN {
+  return x && typeof x.next === 'function';
 }
-
-let count = 0;
-
-export interface EffectCall<R, E extends Effect, E2 extends Effect = never>
-  extends Syntax<R, E> {
-  _R: R;
-  _E: E;
-  effect: E;
-  programThen: (result: E["__return"]) => Syntax<R, E2>;
-  type: "effectCall";
-}
-
-export function isEffectCall(val: any): val is EffectCall<any, any> {
-  return val.type === "effectCall";
-}
-
-export interface Done<R, E extends Effect> extends Syntax<R, E> {
-  _R: R;
-  _E: E;
-  value: R;
-  type: "done";
-}
-
-export function isDone(val: any): val is Done<any, any> {
-  return val.type === "done";
-}
-// goes from A to R
-export interface Handler<
-  R,
-  E extends Effect,
-  A,
-  E2 extends Effect = never,
-  E3 extends Effect = never
-> extends Syntax<R, E> {
-  _R: R;
-  _E: E;
-  handleKey: E["key"];
-  program: Syntax<A, E>;
-  handleReturn: HandleReturn<A, R, E2>;
-  handleEffect: HandleEffect<E, R, E3>;
-  type: "handler";
-}
-export type HandleReturn<A, R, E extends Effect> = (val: A) => Syntax<R, E>;
-export type HandleEffect<E extends Effect, R, E2 extends Effect> = (
-  val: E["value"],
-  resume: (val: E["__return"]) => Resume<E["__return"], R>
-) => Syntax<R, E2>;
-export function isHandler(val: any): val is Handler<any, any, any> {
-  return val.type === "handler";
-}
-
-export const resumeKey = Symbol("@@internal@@/resume");
-export type NoInfer<T> = [T][T extends any ? 0 : never];
-export interface Resume<V, T>
-  extends Effect<
-    typeof resumeKey,
-    {
-      handlerFrame: HandlerList[number];
-      value: V;
-      programThen: (val: V) => Syntax<any>;
-    },
-    T
-  > {}
-
-export interface Syntax<R, E extends Effect = never> {
-  _R: R;
-  _E: E;
-}
-export const done = <T>(value: T) =>
-  (({ value, type: "done" } as any) as Syntax<T, never>);
-
-export const handle = <
-  A,
-  T,
-  E extends Effect,
-  E2 extends Effect,
-  E3 extends Effect
->(
-  handleKey: E["key"],
-  program: Syntax<A, E>,
-  handleReturn: HandleReturn<A, T, E2>,
-  handleEffect: HandleEffect<E, T, E3>
-) =>
-  (({
-    handleKey,
-    type: "handler",
-    handleReturn,
-    handleEffect,
-    program
-  } as any) as Syntax<T, E2>);
-
-export const performEffect = <E extends Effect, T, E2 extends Effect>(
-  effect: E,
-  programThen: (result: E["__return"]) => Syntax<T, E2>
-) => (({ type: "effectCall", programThen, effect } as any) as Syntax<T, E>);
-
-export const createEffect = <K extends PropertyKey, V, R>(key: K, value: V) =>
-  ({
-    key,
-    value
-  } as Effect<K, V, R>);
-
-export type then<R = any> = (val: R) => void;
-export type HandlerList = {
-  key: PropertyKey;
-  handler: HandleEffect<any, any, any>;
-  // returnTo: then;
-  // return: then;
-}[];
-const pop = <T>(a: T[]) => a.slice(0, a.length - 1);
-const last = <T>(a: T[]) => a[a.length - 1];
-const findHandler = (key: PropertyKey, a: HandlerList): HandlerList[number] => {
-  const l = last(a);
-  if (!l) throw new Error("Handler not found");
-  if (key === l.key) {
-    return l;
-  }
-  return findHandler(key, pop(a));
+export type OP<_R = any, S extends string = string, T = any> = {
+  _IS_OP: true;
+  _________R: _R;
+  data: T;
+  type: S;
 };
-interface ConsoleLog extends Effect<"ConsoleLog", string, void> {}
-const ConsoleLog = (val: string) =>
-  createEffect<"ConsoleLog", string, void>("ConsoleLog", val) as ConsoleLog;
-const per = performEffect(ConsoleLog("hello world"), () =>
-  done("printed hello world")
-);
-const dndper = done("didnt print hello world");
-const program = handle(
-  "ConsoleLog",
-  per,
-  (e) => {
-    return done([e]);
-    // return done([e]) as Syntax<string[], ConsoleLog>;
-  },
-  (log, resume) => {
-    return performEffect(resume(), (res) =>
-      performEffect(resume(), (res2) => done([...res, ...res2]))
-    );
-    // return performEffect(resume(), (res) => done(res));
-    // return done([log]);
-  }
-);
-// run(program).then(console.log).catch(console.log);
-
-const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
-  performEffect(createEffect("test1", "hi1"), (hi1) =>
-    performEffect(createEffect("test0", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
-  )
-);
-const program2 = handle(
-  "test1" as never,
-  handle(
-    "test0",
-    dostuff,
-    (e) => done(e),
-    (val, resume) => {
-      console.log("performed test0");
-      return performEffect(resume(val), (res) => done("~" + res + "~"));
-    }
-  ),
-  (e) => done(e),
-  (val, resume) => {
-    console.log("performed test1");
-    return performEffect(resume(val), (res) => done("(" + res + ")"));
-  }
-);
-
-run(program2).then(console.log).catch(console.log);
-// run(
-//   handle(
-//     "test1",
-//     dostuff,
-//     (a) => done(a),
-//     (val, resume) => performEffect(resume(val), (res) => done("~" + res + "~"))
-//   )
-// )
-// .then(console.log)
-// .catch(console.log);
-
-function printNotovflr(value) {
-  count++;
-  if (count < 8) {
-    console.log("log", value);
-    return true;
-  }
-  return false;
+function isOp<R = any, S extends string = string, T = any>(
+  x: any,
+): x is OP<R, S, T> {
+  return x && x._IS_OP;
+}
+export function op<
+  _OP extends OP<any, any, any>,
+  S = _OP['type'],
+  T = _OP['data'],
+  R = _OP extends OP<infer R, any, any> ? R : never
+>(type: S, data: T): Generator<_OP, R, any> {
+  return toGenStar<_OP, R>({
+    _IS_OP: true,
+    type,
+    data,
+  } as any);
 }
 
-function run<R>(program: Syntax<R, never>): Promise<R> {
-  function runProgram<R>(
-    program: Syntax<R, any>,
-    then: then<R>,
-    handlers: HandlerList = []
-  ): void {
-    if (isDone(program)) {
-      handleDone(program, then, handlers);
-    } else if (isHandler(program)) {
-      handleHandler(program, then, handlers);
-    } else if (isEffectCall(program)) {
-      if (program.effect.key !== resumeKey) {
-        handleEffectCall(program, then, handlers);
-      } else {
-        handleResumeEffect(program, then, handlers);
-      }
-    } else
-      throw Error(
-        `Invalid instruction! Received: ${program} and expected an (Effect Call | Handler | Done).`
-      );
-  }
-  function handleDone(
-    program: Done<any, any>,
-    then: then<any>,
-    handlers: HandlerList = []
-  ) {
-    if (printNotovflr(program.value)) {
-      then(program.value);
-    } else {
-      console.log("!!!!!!overflow!!!!!!");
-    }
-  }
-  function handleHandler(
-    program: Handler<any, any, any, any>,
-    then: then<any>,
-    handlers: HandlerList = []
-  ) {
-    const { handleEffect, handleReturn, program: handleProgram } = program;
-    const handlerFrame = {
-      handler: handleEffect,
-      key: program.handleKey
-    };
-    runProgram(
-      handleProgram,
-      // then will only be called here if the next program is a Handler or Pure
-      (val) => {
-        // this value won't change, it's only here for sharing purposes
-        runProgram(handleReturn(val), (transformResult) => {
-          then(transformResult);
-        });
-      },
-      [...handlers, handlerFrame]
-    );
-  }
-
-  function handleEffectCall(
-    program: EffectCall<any, any, never>,
-    then: then<any>,
-    handlers: HandlerList = []
-  ) {
-    const { effect, programThen } = program;
-    const { key, value } = effect;
-    const handlerFrame = findHandler(key, handlers);
-    const handlerProgram = handlerFrame.handler(value, (value) =>
-      createEffect(resumeKey, { handlerFrame, value, programThen })
-    );
-    // skip return transformer
-    runProgram(handlerProgram, then, handlers);
-  }
-  function handleResumeEffect(
-    program: EffectCall<any, any, never>,
-    then: then<any>,
-    handlers: HandlerList = []
-  ) {
-    const { effect, programThen: handlerProgramThen } = program;
-    const { key, value } = effect;
-    const { programThen, handlerFrame, value: resumeValue } = value;
-    // programThen is actual program
-    const programThenSyntax = programThen(resumeValue);
-    // run actual program
-    runProgram(
-      programThenSyntax,
-      (returnTransformValue) => {
-        // run effect handler program
-        runProgram(handlerProgramThen(returnTransformValue), then, handlers);
-      },
-      handlers
-    );
-  }
-  return new Promise((resolve, reject) => {
-    try {
-      runProgram(program, resolve, []);
-    } catch (e) {
-      // handler not found
-      reject(e);
-    }
-  });
+export function* toGenStar<T, R>(valueToYield: T): Generator<T, R, any> {
+  return (yield valueToYield) as R;
 }
 
-// run(program)
-//   .then((res) => console.log("FINISHED RUNNING PROGRAM: ", res))
-//   .catch(console.log);
+export function resume(gen: GEN, arg: any) {
+  return resumeGenerator(gen, arg);
+}
+
+function resumeGenerator(gen: GEN, nextVal: any | undefined) {
+  const { value, done } = gen.next(nextVal) as { value: any; done?: true };
+  if (done) {
+    const _return = gen._return;
+    if (_return) {
+      resumeGenerator(_return, value);
+    } else gen._onDone!(value);
+  } else {
+    if (typeof value === 'function') {
+      value(gen);
+    } else if (isOp(value)) {
+      performOp(value.type, value.data, gen);
+    } else throw new Error('Yielded invalid value: ' + value);
+  }
+}
+
+export function start<R>(gen: GEN<never, R>, onDone: (val: R) => void) {
+  gen._onDone = onDone;
+  resumeGenerator(gen, null);
+}
+// export interface Handler<R = any> {
+//   // ExtraEnv = any,  TODO: missing extra env from inside the handlers
+//   return?: (val: any) => GEN<any, R>;
+//   [P: string]: HandlerFn<any, R> | undefined;
+// }
+interface Ret<R> {
+  // ExtraEnv = any,  TODO: missing extra env from inside the handlers
+  return?: (val: any) => GEN<any, R>;
+}
+export interface Handler<R = any>
+  extends Record<string, HandlerFn<any, R> | undefined>,
+    Ret<R> {}
+export type HandlerFn<ExtraEnv = any, R = any> = {
+  (val: any, resume: (value?: any) => Generator<any, R, any>): GEN<ExtraEnv, R>;
+};
+
+interface EffFn {
+  _return?: GEN;
+  _onDone?: (val: any) => void;
+  _handler?: Handler;
+}
+type CalculateGN<Gen extends GEN, Removed> = Gen extends GEN<infer A, infer B>
+  ? GEN<Remove<A, Removed>, B>
+  : never;
+export type GEN<E = any, R = any> = Generator<E, R, any> & EffFn;
+function makeHandlerFrame(gen: GEN, handler: Handler): GEN {
+  return (function* withHandlerFrame() {
+    const result = yield* gen;
+    // eventually handles the return value
+    if (handler.return) {
+      console.log('returned')
+      return yield* handler.return(result);
+    }
+    return result;
+  })() as any;
+}
+export function withHandler<G extends GEN, RemoveEnv>(
+  gen: G,
+  handler: Handler<any>,
+): CalculateGN<G, RemoveEnv> {
+  const withHandlerGen = makeHandlerFrame(gen, handler);
+  // reason for doing this is so i can add _handler
+  return toGenStar((lastGen: GEN) => {
+    withHandlerGen._handler = handler; // doesnt need to be here, can be above
+    withHandlerGen._return = lastGen;
+    withHandlerGen._onDone = lastGen._onDone;
+    resumeGenerator(withHandlerGen, null);
+  }) as any;
+}
+
+function findHandler(performGen: GEN, type: string): [any, GEN] {
+  let withHandlerGen = performGen;
+  while (withHandlerGen._handler == null || !withHandlerGen._handler[type]) {
+    if (withHandlerGen._return == null) break;
+    withHandlerGen = withHandlerGen._return as GEN;
+  }
+
+  if (withHandlerGen._handler == null || !withHandlerGen._handler[type]) {
+    throw new Error(`Unhandled Effect ${type}!`);
+  }
+
+  // found a handler, get the withHandler Generator
+  const handlerFunc = withHandlerGen._handler[type]!;
+  return [handlerFunc, withHandlerGen];
+}
+
+function performOp(type: string, data: any, performGen: GEN) {
+  const [handlerFunc, handlersAndAfterReturnGen] = findHandler(
+    performGen,
+    type,
+  );
+  const activatedHandlerGen = handlerFunc(data, function delimitedCont(value) {
+    return toGenStar((_currentGen: GEN) => {
+      // console.log(currentGen === activatedHandlerGen);
+      // handlersGen._return = currentGen;
+      handlersAndAfterReturnGen._return = activatedHandlerGen;
+      resumeGenerator(performGen, value);
+    }); 
+  });    
+
+  // will return to the parent of withHandler
+  activatedHandlerGen._return = handlersAndAfterReturnGen._return;
+  resumeGenerator(activatedHandlerGen, null);
+}
+
+
+/**
+ * 
+function* hey() { <- performGen (actually adapted withHandlerGen)
+  yield* op("hi1", "10");
+}
+function* testmulti() { <- handlersAndAfterReturnGen._return
+  yield* withHandler(hey(),{ <- handlersAndAfterReturnGen
+       *h1(){...} <- activatedHandlerGen
+  }) 
+}
+`->` = `returns to`
+
+performGen (adapted hey)
+  -> handlersAndAfterReturnGen (withHandler)
+     -> handlersAndAfterReturnGen (h1)
+        -> handlersAndAfterReturnGen._return (testMulti)
+
+
+        
+
+the truth is that before k() and after k() are two very different functions, the first is activated immediately and the second
+is only activated afther the handler is done
+his impl can do that with { return yield* gen etc... }.return = // continue second half of handler with result F
+
+
+to be able to make handler function (return to)/continue the activated handler function, you need to represent
+them as objets or some way where they can be switched if needed (if activated)
+ */
