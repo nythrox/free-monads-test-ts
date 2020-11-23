@@ -148,7 +148,7 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       // return done([log]);
     }
   );
-  run(program).then(console.log).catch(console.log);
+  // run(program).then(console.log).catch(console.log);
   
   const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
     performEffect(createEffect("test1", "hi1"), (hi1) =>
@@ -175,10 +175,26 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
   
   // run(program2).then(console.log).catch(console.log);
   
+  const singleprogrammulti = handle(
+    "smh",
+    performEffect(createEffect("smh", "hi"), (res) => done(res + " done")),
+    (val) => done(val + " return"),
+    (val, resume) =>
+      performEffect(resume(val), (res1) =>
+        performEffect(resume(val), (res2) =>
+          performEffect(resume(val), (res3) =>
+            done(`((${res1}) (${res2}) (${res3})) resumed`)
+          )
+        )
+      )
+  );
+  
+  run(singleprogrammulti).then(console.log).catch(console.log);
+  
   function printNotovflr(value) {
     count++;
     if (count < 100) {
-      console.log("log", value);
+      // console.log("log", value);
       return true;
     }
     return false;
@@ -211,6 +227,7 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       handlers: HandlerList = []
     ) {
       if (printNotovflr(program.value)) {
+        console.log("calling done from actually done", program.value);
         then(program.value);
       } else {
         console.log("!!!!!!overflow!!!!!!");
@@ -229,6 +246,7 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
         transform: handleReturn,
         beforeThen: (val) => {
           runProgram(handlerFrame.transform(val), (transformResult) => {
+            console.log("calling done from beforeHandler", transformResult);
             then(transformResult);
           });
         }
@@ -237,6 +255,7 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
         handleProgram,
         // then will only be called here if the next program is a Handler or Pure
         (val) => {
+          console.log("called then!");
           handlerFrame.beforeThen(val);
         },
         [...handlers, handlerFrame]
@@ -268,19 +287,28 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const { programThen, handlerFrame, value: resumeValue } = value;
       // programThen is actual program
       const saved = handlerFrame.beforeThen;
+      console.log("!!!handling resume", saved.toString());
+      console.log(saved.owo);
       const programThenSyntax = programThen(resumeValue);
-      handlerFrame.beforeThen = (returnTransformValue) => {
-        // run effect handler program
-        runProgram(
-          handlerProgramThen(returnTransformValue),
-          (e) => {
-            runProgram(handlerFrame.handleReturn(e), saved, handlers);
-          },
-          handlers
-        );
-      };
       // run actual program
-      runProgram(programThenSyntax, then, handlers);
+      runProgram(
+        programThenSyntax,
+        (returnTransformValue) => {
+          // run effect handler program
+          const hnext = handlerProgramThen(returnTransformValue);
+          console.log("@hhh");
+          runProgram(
+            hnext,
+            (e) => {
+              const next = handlerFrame.handleReturn(e);
+              // console.log(saved.toString());
+              runProgram(next, then, handlers);
+            },
+            handlers
+          );
+        },
+        handlers
+      );
     }
     return new Promise((resolve, reject) => {
       try {
