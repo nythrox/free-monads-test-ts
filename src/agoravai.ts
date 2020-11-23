@@ -289,6 +289,8 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
         mainProgram: program
       })
     );
+    // 0. Make the activated handler returns to the *return transformation* parent return,
+    // and not to the *return transformation* directly (so it doesn't get transformed)
     activatedHandlerProgram.prev = handlerFrame.program.prev;
     activatedHandlerProgram._return = activatedHandlerProgram.prev._return;
     runProgram(activatedHandlerProgram, handlers);
@@ -297,18 +299,29 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     program: EffectCall<any, Resume<any, any>, never>,
     handlers: HandlerList = []
   ) {
-    // program being passed is EffectCall(resumeProgram, { mainProgram, activatedHandlerProgram, handlerFrame })
+    // program being passed is EffectCall(Resume({ mainProgram, activatedHandlerProgram, handlerFrame, value })
     const { effect } = program;
     const { value } = effect;
     const { handlerFrame, value: resumeValue, mainProgram } = value;
+
+    // 2. when the *return* transformation finishes,
+    // make sure it continues the activated handler with the return result
     handlerFrame.program.prev = {
       _return(transformedVal) {
+        // 3. continue the activated handler, and when it finishes
+        // complete *program*, which is the original parent return of the *return transformation*,
+        // see [[step 0]]
         const continueHandler = program.programThen(transformedVal);
         continueHandler.prev = program;
         continueHandler._return = continueHandler.prev._return;
         runProgram(continueHandler, handlers);
       }
     } as Syntax<any, any>;
+
+    // 1. a call(Resume(resumeValue)) has just been activated.
+    // first step: continue the main program with resumeValue,
+    // and when it finishes, let it go all the way through the *return*
+    // transformation proccess (continueMain._return = mainProgram._return)
     const continueMain = mainProgram.programThen(resumeValue);
     continueMain.prev = mainProgram;
     continueMain._return = mainProgram._return;
