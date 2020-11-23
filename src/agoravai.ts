@@ -151,8 +151,8 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
   run(program).then(console.log).catch(console.log);
   
   // const dostuff = performEffect(createEffect("test0", "hi0"), (hi0) =>
-  //   performEffect(createEffect("test0", "hi1"), (hi1) =>
-  //     performEffect(createEffect("test1", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
+  //   performEffect(createEffect("test1", "hi1"), (hi1) =>
+  //     performEffect(createEffect("test0", "hi2"), (hi2) => done(hi0 + hi1 + hi2))
   //   )
   // );
   // const program2 = handle(
@@ -174,16 +174,6 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
   // );
   
   // run(program2).then(console.log).catch(console.log);
-  // run(
-  //   handle(
-  //     "test1",
-  //     dostuff,
-  //     (a) => done(a),
-  //     (val, resume) => performEffect(resume(val), (res) => done("~" + res + "~"))
-  //   )
-  // )
-  // .then(console.log)
-  // .catch(console.log);
   
   function printNotovflr(value) {
     count++;
@@ -235,8 +225,10 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const handlerFrame = {
         handler: handleEffect,
         key: program.handleKey,
+        origTransform: handleReturn,
+        transform: handleReturn,
         beforeThen: (val) => {
-          runProgram(handleReturn(val), (transformResult) => {
+          runProgram(handlerFrame.transform(val), (transformResult) => {
             then(transformResult);
           });
         }
@@ -262,6 +254,7 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const handlerProgram = handlerFrame.handler(value, (value) =>
         createEffect(resumeKey, { handlerFrame, value, programThen })
       );
+      handlerFrame.transform = (e) => done(e);
       // skip return transformer
       runProgram(handlerProgram, then, handlers);
     }
@@ -278,7 +271,13 @@ export interface Effect<K extends PropertyKey = any, V = any, R = any> {
       const saved = handlerFrame.beforeThen;
       handlerFrame.beforeThen = (returnTransformValue) => {
         // run effect handler program
-        runProgram(handlerProgramThen(returnTransformValue), saved, handlers);
+        runProgram(
+          handlerProgramThen(returnTransformValue),
+          (e) => {
+            runProgram(handlerFrame.origTransform(e), saved, handlers);
+          },
+          handlers
+        );
       };
       // run actual program
       runProgram(programThenSyntax, then, handlers);
