@@ -21,140 +21,170 @@ const handleHelloWorld = handle({
     exec(done(value), (res) => {
       then([res]);
     });
+    // then([value]);
   },
   hello_world: (value, exec, k, then) => {
-    exec(done(value + " owo"), (res) => {
-      k(res, (after) => {
-        then(after);
-      });
-    }); // exec: execute with correct handlers
+    // exec(done(value + " owo"), (res) => {
+    k(value + " owo", (after) => {
+      console.log("a", after);
+      then([...after, value + "owo", "~"]);
+    });
+    // }); // exec: execute with correct handlers
+    // then(value);
   }
 });
 const program = handleHelloWorld(
-  perform(helloWorld("hoi"))((res) => done("done: " + res))
+  perform(helloWorld("hoi"))((res) =>
+    perform(helloWorld("hoi"))((res2) => done("done: " + res + res2))
+  )
+  // perform(helloWorld("hoi"))((res) => done("done: " + res))
+  // done("ho")
 );
 
 const pop = (arr) => arr.slice(0, arr.length - 1);
 const last = (arr) => arr[arr.length - 1];
 
-const findHandler = (key) => (a) => {
-  const l = last(a);
+const findHandler = (key) => (arr) => {
+  const l = last(arr);
   if (!l) throw new Error("Handler not found: " + key.toString());
   if (l.handlers[key]) {
-    return [l.handlers[key], l.transform];
+    return [l.handlers[key], l.ref];
   }
-  return findHandler(key)(pop(a));
+  return findHandler(key)(pop(arr));
 };
 
-/// // calls the next continatuation with a value. when that continuation is done, it calles callback2 with a value. when that one is done, it calls callback3 with a value
-/// // nnnext: (val, (val, val => void) => void) => void
-const stack = [];
-const interpret = (program, next, customStack) => {
+const interpret = (program, ref) => {
   if (program.type === "done") {
-    next(program.value);
+    ref.next(program.value);
     return;
   }
   if (program.type === "handler") {
-    reset(function (shift, next) {
-      shift(
-        (transform, done) => {
-          stack.push({
-            transform,
-            handlers: program.handlers
-          });
-          interpret(program.program, done, stack);
-        },
-        (res) => {
-          program.handlers.return(
-            res,
-            (syntax, after) => {
-              interpret(syntax, after, [...stack]); // TODO: handler scope
-            },
-            next
-          );
-        }
-      );
-      //---
-    }, next);
+    const { handlers, program: programBeingHandled } = program;
+    const programBeingHandledRef = {
+      prev: ref,
+      next: (value) => {
+        handlers.return(
+          value,
+          // exec
+          (syntax) => (then) => {
+            const syntaxRef = {
+              // prev: ref, // no need for prev, it wont be called
+              handlers: ref.handlers,
+              // next: (e) => {
+              //   console.log("should be undefined: ", syntaxRef.prev);
+              //   then(e);
+              // }
+              next: then
+            };
+            interpret(syntax, syntaxRef);
+          },
+          programBeingHandledRef.prev.next
+        );
+      }
+    };
+    programBeingHandledRef.handlers = [
+      ...ref.handlers,
+      {
+        handlers,
+        ref: programBeingHandledRef
+      }
+    ];
+    interpret(programBeingHandled, programBeingHandledRef);
     return;
   }
   if (program.type === "perform") {
-    const [handler, transform] = findHandler(program.effect.key)(customStack);
+    const { effect, cont } = program;
+    const [handler, handlerRef] = findHandler(effect.key)(ref.handlers);
     handler(
-      program.effect.value,
-      // interpret
-      (syntax, then) => {
-        interpret(syntax, then, [...stack]); // TODO: handler scope
+      effect.value,
+      // exec
+      (syntax) => (then) => {
+        const syntaxRef = {
+          // prev: handlerRef, // no need for prev, it wont be called
+          handlers: handlerRef.prev.handlers,
+          next: then
+          // next: (e) => {
+          //   console.log("should be undefined2: ", syntaxRef.prev);
+          //   then(e);
+          // }
+        };
+        interpret(syntax, syntaxRef);
       },
-      // k
-      (value, thenContinueHandler) => {
-        interpret(
-          program.cont(value),
-          (finished) => {
-            transform(finished, (transformed) => {
-              thenContinueHandler(transformed);
-            });
-          },
-          stack
-        );
+      // k/resume
+      (value) => (thenContinueHandler) => {
+        const continuationSyntax = cont(value);
+        //when the (return) transforming is done, call `thenContinueHandler`
+        handlerRef.prev.next = thenContinueHandler;
+        interpret(continuationSyntax, ref /* { ...ref }*/);
       },
-      next
+      // instead of returning to parent, return to the handlers parent
+      handlerRef.prev.next
     );
     return;
   }
 };
 const run = (initialProram, onDone) => {
-  return interpret(initialProram, onDone, stack);
+  return interpret(initialProram, {
+    prev: null,
+    handlers: [],
+    next: onDone
+  });
 };
 
 // run(program, (e) => console.log("finished!! res: ", e));
 
-function reset(fn, then) {
-  let mutable = { then };
-  fn(
-    function shift(inShift, restOfProgram) {
-      inShift(program, then);
-      function program(val, afterRestOfProgramDone) {
-        mutable.then = (restofprogramdonevalue) => {
-          afterRestOfProgramDone(restofprogramdonevalue);
-        };
-        restOfProgram(val);
-      }
-    },
-    (val) => {
-      mutable.then(val);
-    }
-  );
-}
-
 const test0 = effect("test0");
 const test1 = effect("test1");
 
-const dostuff = perform(test0("hi0"))((hi0) =>
-  perform(test0("hi1"))((hi1) =>
-    perform(test1("hi2"))((hi2) =>
+const dostuff = perform(test1("hi0"))((hi0) =>
+  perform(test1("hi1"))((hi1) =>
+    perform(test0("hi2"))((hi2) =>
       perform(test1("hi3"))((hi3) => done(hi0 + hi1 + hi2 + hi3))
     )
   )
 );
 
+const pipe = (val, ...fns) => fns.reduce((val, fn) => fn(val), val);
+const flow = (...fns) => (val) => fns.reduce((val, fn) => fn(val), val);
+const of = (value) => (then) => then(value);
+const chain = (chainer) => (cps) => (then) => cps((val) => chainer(val)(then));
+const map = (mapper) => chain(flow(mapper, of));
+
 const handleTest0 = handle({
   return: (val, exec, then) => {
-    then(val + "t0");
+    then(val + ".t0");
   },
   test0: (val, exec, k, then) => {
-    k(val, (res) => {
-      then("~" + res + "~");
-    });
+    pipe(
+      exec(perform(test1("owo"))((sla) => done(sla))),
+      chain((e) =>
+        pipe(
+          k(val),
+          map((res) => "~" + res + "~" + e)
+        )
+      )
+      /*
+        CPS.do(function*() {
+          const e = yield* perform(test1("owo"))((sla) => done(sla));
+          const res = yield* k(val)
+          return "~" + res + "~" + e
+        })(then)
+      */
+    )(then);
+    // exec(perform(test1("owo"))((e) => done(e)))((e) => {
+    //   k(val)((res) => {
+    //     then("~" + res + "~" + e);
+    //   });
+    // });
   }
 });
 const handleTest1 = handle({
   return: (val, exec, then) => {
-    then(val + "t1");
+    exec(done(val + ".t1"))(then);
   },
   test1: (val, exec, k, then) => {
-    k(val, (res) => {
-      then("(" + res + ")");
+    k(val)((res) => {
+      exec(done("(" + res + ")"))(then);
     });
   }
 });

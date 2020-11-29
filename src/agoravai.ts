@@ -12,23 +12,23 @@ export interface EffectCall<R, E extends Effect, E2 extends Effect = never>
   _R: R;
   _E: E;
   effect: E;
-  programThen: (result: E["__return"]) => Syntax<R, E2>;
-  type: "effectCall";
+  programThen: (result: E['__return']) => Syntax<R, E2>;
+  type: 'effectCall';
 }
 
 export function isEffectCall(val: any): val is EffectCall<any, any> {
-  return val.type === "effectCall";
+  return val.type === 'effectCall';
 }
 
 export interface Done<R, E extends Effect> extends Syntax<R, E> {
   _R: R;
   _E: E;
   value: R;
-  type: "done";
+  type: 'done';
 }
 
 export function isDone(val: any): val is Done<any, any> {
-  return val.type === "done";
+  return val.type === 'done';
 }
 // goes from A to R
 export interface Handler<
@@ -40,22 +40,22 @@ export interface Handler<
 > extends Syntax<R, E> {
   _R: R;
   _E: E;
-  handleKey: E["key"];
+  handleKey: E['key'];
   program: Syntax<A, E>;
   handleReturn: HandleReturn<A, R, E2>;
   handleEffect: HandleEffect<E, R, E3>;
-  type: "handler";
+  type: 'handler';
 }
 export type HandleReturn<A, R, E extends Effect> = (val: A) => Syntax<R, E>;
 export type HandleEffect<E extends Effect, R, E2 extends Effect> = (
-  val: E["value"],
-  resume: (val: E["__return"]) => Resume<E["__return"], R>
+  val: E['value'],
+  resume: (val: E['__return']) => Resume<E['__return'], R>,
 ) => Syntax<R, E2>;
 export function isHandler(val: any): val is Handler<any, any, any> {
-  return val.type === "handler";
+  return val.type === 'handler';
 }
 
-export const resumeKey = Symbol("@@internal@@/resume");
+export const resumeKey = Symbol('@@internal@@/resume');
 export type NoInfer<T> = [T][T extends any ? 0 : never];
 export interface Resume<V, T>
   extends Effect<
@@ -76,7 +76,7 @@ export interface Syntax<R, E extends Effect = never> {
   _return: (val: R) => void;
 }
 export const done = <T>(value: T) =>
-  (({ value, type: "done" } as any) as Syntax<T, never>);
+  (({ value, type: 'done' } as any) as Syntax<T, never>);
 
 export type Remove<
   T extends Effect,
@@ -87,7 +87,7 @@ export const handle = <
   A,
   T,
   E extends Effect,
-  SLA extends PropertyKey = Effect["key"],
+  SLA extends PropertyKey = Effect['key'],
   P extends SLA = any,
   E2 extends Effect = any,
   E3 extends Effect = any
@@ -95,26 +95,26 @@ export const handle = <
   handleKey: P,
   program: Syntax<A, E>,
   handleReturn: HandleReturn<A, T, E2>,
-  handleEffect: HandleEffect<E, T, E3>
+  handleEffect: HandleEffect<E, T, E3>,
 ) =>
   (({
     handleKey,
-    type: "handler",
+    type: 'handler',
     handleReturn,
     handleEffect,
-    program
+    program,
   } as any) as Syntax<T, Remove<E, P> | E2 | Remove<E3, typeof resumeKey>>);
 
 export const performEffect = <E extends Effect, T, E2 extends Effect>(
   effect: E,
-  programThen: (result: E["__return"]) => Syntax<T, E2>
+  programThen: (result: E['__return']) => Syntax<T, E2>,
 ) =>
-  (({ type: "effectCall", programThen, effect } as any) as Syntax<T, E | E2>);
+  (({ type: 'effectCall', programThen, effect } as any) as Syntax<T, E | E2>);
 
 export const createEffect = <K extends PropertyKey, V, R>(key: K, value: V) =>
   ({
     key,
-    value
+    value,
   } as Effect<K, V, R>);
 
 export type then<R = any> = (val: R) => void;
@@ -127,24 +127,24 @@ const pop = <T>(a: T[]) => a.slice(0, a.length - 1);
 const last = <T>(a: T[]) => a[a.length - 1];
 const findHandler = (key: PropertyKey, a: HandlerList): HandlerList[number] => {
   const l = last(a);
-  if (!l) throw new Error("Handler not found: " + key.toString());
+  if (!l) throw new Error('Handler not found: ' + key.toString());
   if (key === l.key) {
     return l;
   }
   return findHandler(key, pop(a));
 };
-interface ConsoleLog extends Effect<"ConsoleLog", string, void> {}
+interface ConsoleLog extends Effect<'ConsoleLog', string, void> {}
 const ConsoleLog = (val: string) =>
-  createEffect<"ConsoleLog", string, void>("ConsoleLog", val) as ConsoleLog;
-const per = performEffect(ConsoleLog("hello world"), () =>
-  done("printed hello world")
+  createEffect<'ConsoleLog', string, void>('ConsoleLog', val) as ConsoleLog;
+const per = performEffect(ConsoleLog('hello world'), () =>
+  done('printed hello world'),
 );
-const dndper = done("didnt print hello world");
+const dndper = done('didnt print hello world');
 const program = handle(
-  "ConsoleLog",
+  'ConsoleLog',
   per,
   (e) => {
-    return done([e + "!!"]);
+    return done([e + '!!']);
     // return done([e]) as Syntax<string[], ConsoleLog>;
   },
   (log, resume) => {
@@ -157,61 +157,61 @@ const program = handle(
     // });
     // return performEffect(resume(), (res) => done(res));
     return done([log]);
-  }
+  },
 );
 // run(program).then(console.log).catch(console.log);
 const test0 = (msg: string) =>
-  createEffect<"test0", string, string>("test0", msg);
+  createEffect<'test0', string, string>('test0', msg);
 const test1 = (msg: string) =>
-  createEffect<"test1", string, string>("test1", msg);
+  createEffect<'test1', string, string>('test1', msg);
 
-const dostuff = performEffect(test0("hi0"), (hi0) =>
-  performEffect(test0("hi1"), (hi1) =>
-    performEffect(test1("hi2"), (hi2) =>
-      performEffect(test1("hi3"), (hi3) => done(hi0 + hi1 + hi2 + hi3))
-    )
-  )
+const dostuff = performEffect(test0('hi0'), (hi0) =>
+  performEffect(test0('hi1'), (hi1) =>
+    performEffect(test1('hi2'), (hi2) =>
+      performEffect(test1('hi3'), (hi3) => done(hi0 + hi1 + hi2 + hi3)),
+    ),
+  ),
 );
 const program2 = handle(
-  "test1",
+  'test1',
   handle(
-    "test0",
+    'test0',
     dostuff,
-    (e) => done(e + "transformed0"),
+    (e) => done(e + 'transformed0'),
     (val, resume) => {
       // return performEffect(createEffect("test1", "hi3"), (res1) =>
       //   performEffect(resume(val), (res) =>
       //     done("~" + "[" + res1 + "]" + res + "~")
       //   )
       // );
-      return performEffect(resume(val), (res) => done("~" + res + "~"));
-    }
+      return performEffect(resume(val), (res) => done('~' + res + '~'));
+    },
   ),
-  (e) => done(e + "transformed1"),
+  (e) => done(e + 'transformed1'),
   (val, resume) => {
     // return performEffect(createEffect("test1", "hi3"), (res1) =>
     //   performEffect(resume(val), (res) =>
     //     done("~" + "[" + res1 + "]" + res + "~")
     //   )
     // );
-    return performEffect(resume(val), (res) => done("(" + res + ")"));
-  }
+    return performEffect(resume(val), (res) => done('(' + res + ')'));
+  },
 );
 
 run(program2).then(console.log).catch(console.log);
 
 const singleprogrammulti = handle(
-  "smh",
-  performEffect(createEffect("smh", "hi"), (res) => done(res + " done")),
-  (val) => done("(r " + val + " r)"),
+  'smh',
+  performEffect(createEffect('smh', 'hi'), (res) => done(res + ' done')),
+  (val) => done('(r ' + val + ' r)'),
   (val, resume) =>
     performEffect(resume(val), (res1) =>
       performEffect(resume(val), (res2) =>
         performEffect(resume(val), (res3) =>
-          done(res1 + res2 + res3 + " resumed! :)")
-        )
-      )
-    )
+          done(res1 + res2 + res3 + ' resumed! :)'),
+        ),
+      ),
+    ),
 );
 
 // run(singleprogrammulti).then(console.log).catch(console.log);
@@ -241,7 +241,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       }
     } else
       throw Error(
-        `Invalid instruction! Received: ${program} and expected an (Effect Call | Handler | Done).`
+        `Invalid instruction! Received: ${program} and expected an (Effect Call | Handler | Done).`,
       );
   }
   function handleDone(program: Done<any, any>, handlers: HandlerList = []) {
@@ -250,7 +250,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       program._return(program.value);
       // then(program.value);
     } else {
-      console.log("!!!!!!overflow!!!!!!");
+      console.log('!!!!!!overflow!!!!!!');
     }
   }
   function handleHandler(program: Handler<any, any, any, any>) {
@@ -258,7 +258,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     const handlerFrame = {
       handler: handleEffect,
       key: program.handleKey,
-      program: handleProgram
+      program: handleProgram,
     };
     const h = [...program.handlers, handlerFrame];
     handleProgram.handlers = h;
@@ -281,8 +281,8 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       createEffect(resumeKey, {
         handlerFrame,
         value,
-        mainProgram: program
-      })
+        mainProgram: program,
+      }),
     );
     // 0. Make the activated handler returns to the *return transformation* parent return,
     // and not to the *return transformation* directly (so it doesn't get transformed)
@@ -292,7 +292,7 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     runProgram(activatedHandlerProgram);
   }
   function handleResumeEffect(
-    program: EffectCall<any, Resume<any, any>, never>
+    program: EffectCall<any, Resume<any, any>, never>,
   ) {
     // program being passed is EffectCall(Resume({ mainProgram, activatedHandlerProgram, handlerFrame, value })
     const { effect } = program;
@@ -308,11 +308,11 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
         // complete *program*, which is the original parent return of the *return transformation*,
         // see [[step 0]]
         const continueHandler = program.programThen(transformedVal);
-        continueHandler.prev = program;
+        continueHandler.prev = program; 
         continueHandler.handlers = program.handlers;
         continueHandler._return = program._return;
         runProgram(continueHandler);
-      }
+      },
     } as Syntax<any, any>;
 
     // 1. a call(Resume(resumeValue)) has just been activated.
