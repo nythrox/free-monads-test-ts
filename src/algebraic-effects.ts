@@ -1,5 +1,6 @@
 import { Remove } from './effects.test';
 
+
 function isGenerator(x: any): x is GEN {
   return x && typeof x.next === 'function';
 }
@@ -85,7 +86,7 @@ function makeHandlerFrame(gen: GEN, handler: Handler): GEN {
     const result = yield* gen;
     // eventually handles the return value
     if (handler.return) {
-      console.log('returned')
+      console.log('returned');
       return yield* handler.return(result);
     }
     return result;
@@ -131,14 +132,13 @@ function performOp(type: string, data: any, performGen: GEN) {
       // console.log(currentGen === activatedHandlerGen);
       handlersAndAfterReturnGen._return = activatedHandlerGen;
       resumeGenerator(performGen, value);
-    }); 
-  });    
+    });
+  });
 
   // will return to the parent of withHandler
   activatedHandlerGen._return = handlersAndAfterReturnGen._return;
   resumeGenerator(activatedHandlerGen, null);
 }
-
 
 /**
  * 

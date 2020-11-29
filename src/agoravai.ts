@@ -72,6 +72,7 @@ export interface Syntax<R, E extends Effect = never> {
   _R: R;
   _E: E;
   prev: Syntax<any, any>;
+  handlers: any;
   _return: (val: R) => void;
 }
 export const done = <T>(value: T) =>
@@ -188,7 +189,7 @@ const program2 = handle(
   ),
   (e) => done(e + "transformed1"),
   (val, resume) => {
-    // return performEffect(createEffect("test0", "hi3"), (res1) =>
+    // return performEffect(createEffect("test1", "hi3"), (res1) =>
     //   performEffect(resume(val), (res) =>
     //     done("~" + "[" + res1 + "]" + res + "~")
     //   )
@@ -227,19 +228,16 @@ function printNotovflr(value: any) {
 }
 
 function run<R>(program: Syntax<R, never>): Promise<R> {
-  function runProgram<R>(
-    program: Syntax<R, any>,
-    handlers: HandlerList = []
-  ): void {
+  function runProgram<R>(program: Syntax<R, any>): void {
     if (isDone(program)) {
-      handleDone(program, handlers);
+      handleDone(program);
     } else if (isHandler(program)) {
-      handleHandler(program, handlers);
+      handleHandler(program);
     } else if (isEffectCall(program)) {
       if (program.effect.key !== resumeKey) {
-        handleEffectCall(program, handlers);
+        handleEffectCall(program);
       } else {
-        handleResumeEffect(program, handlers);
+        handleResumeEffect(program);
       }
     } else
       throw Error(
@@ -255,33 +253,30 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
       console.log("!!!!!!overflow!!!!!!");
     }
   }
-  function handleHandler(
-    program: Handler<any, any, any, any>,
-    handlers: HandlerList = []
-  ) {
+  function handleHandler(program: Handler<any, any, any, any>) {
     const { handleEffect, handleReturn, program: handleProgram } = program;
     const handlerFrame = {
       handler: handleEffect,
       key: program.handleKey,
       program: handleProgram
     };
+    const h = [...program.handlers, handlerFrame];
+    handleProgram.handlers = h;
     handleProgram.prev = program;
     handleProgram._return = (e) => {
       const transformedSyntax = handleReturn(e);
+      transformedSyntax.handlers = program.handlers;
       transformedSyntax.prev = handleProgram.prev;
       transformedSyntax._return = handleProgram.prev._return;
-      runProgram(transformedSyntax, handlers);
+      runProgram(transformedSyntax);
     };
-    runProgram(handleProgram, [...handlers, handlerFrame]);
+    runProgram(handleProgram);
   }
 
-  function handleEffectCall(
-    program: EffectCall<any, any, never>,
-    handlers: HandlerList = []
-  ) {
+  function handleEffectCall(program: EffectCall<any, any, never>) {
     const { effect } = program;
     const { key, value } = effect;
-    const handlerFrame = findHandler(key, handlers);
+    const handlerFrame = findHandler(key, program.handlers);
     const activatedHandlerProgram = handlerFrame.handler(value, (value) =>
       createEffect(resumeKey, {
         handlerFrame,
@@ -292,12 +287,12 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     // 0. Make the activated handler returns to the *return transformation* parent return,
     // and not to the *return transformation* directly (so it doesn't get transformed)
     activatedHandlerProgram.prev = handlerFrame.program.prev;
-    activatedHandlerProgram._return = activatedHandlerProgram.prev._return;
-    runProgram(activatedHandlerProgram, handlers);
+    activatedHandlerProgram.handlers = handlerFrame.program.prev.handlers;
+    activatedHandlerProgram._return = handlerFrame.program.prev._return;
+    runProgram(activatedHandlerProgram);
   }
   function handleResumeEffect(
-    program: EffectCall<any, Resume<any, any>, never>,
-    handlers: HandlerList = []
+    program: EffectCall<any, Resume<any, any>, never>
   ) {
     // program being passed is EffectCall(Resume({ mainProgram, activatedHandlerProgram, handlerFrame, value })
     const { effect } = program;
@@ -307,14 +302,16 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     // 2. when the *return* transformation finishes,
     // make sure it continues the activated handler with the return result
     handlerFrame.program.prev = {
+      handlers: handlerFrame.program.prev.handlers,
       _return(transformedVal) {
         // 3. continue the activated handler, and when it finishes
         // complete *program*, which is the original parent return of the *return transformation*,
         // see [[step 0]]
         const continueHandler = program.programThen(transformedVal);
         continueHandler.prev = program;
-        continueHandler._return = continueHandler.prev._return;
-        runProgram(continueHandler, handlers);
+        continueHandler.handlers = program.handlers;
+        continueHandler._return = program._return;
+        runProgram(continueHandler);
       }
     } as Syntax<any, any>;
 
@@ -324,13 +321,15 @@ function run<R>(program: Syntax<R, never>): Promise<R> {
     // transformation proccess (continueMain._return = mainProgram._return)
     const continueMain = mainProgram.programThen(resumeValue);
     continueMain.prev = mainProgram;
+    continueMain.handlers = mainProgram.handlers;
     continueMain._return = mainProgram._return;
-    runProgram(continueMain, handlers);
+    runProgram(continueMain);
   }
   return new Promise((resolve, reject) => {
     try {
       program._return = resolve;
-      runProgram(program, []);
+      program.handlers = [];
+      runProgram(program);
     } catch (e) {
       // handler not found
       reject(e);
