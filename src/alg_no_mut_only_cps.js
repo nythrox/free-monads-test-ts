@@ -18,15 +18,14 @@ const done = (value) => ({
 const helloWorld = effect("hello_world");
 const handleHelloWorld = handle({
   return: (value, exec, then) => {
-    exec(done(value), (res) => {
+    exec(done(value))((res) => {
       then([res]);
     });
     // then([value]);
   },
   hello_world: (value, exec, k, then) => {
     // exec(done(value + " owo"), (res) => {
-    k(value + " owo", (after) => {
-      console.log("a", after);
+    k(value + " owo")((after) => {
       then([...after, value + "owo", "~"]);
     });
     // }); // exec: execute with correct handlers
@@ -130,7 +129,24 @@ const run = (initialProram, onDone) => {
     next: onDone
   });
 };
-
+const Effect = {
+  perform(fun) {
+    function run(history) {
+      const it = fun();
+      let state = it.next();
+      history.forEach((val) => {
+        state = it.next(val);
+      });
+      if (state.done) {
+        return done(state.value);
+      }
+      return perform(state.value)((val) => {
+        return run([...history, val]);
+      });
+    }
+    return run([]);
+  }
+};
 // run(program, (e) => console.log("finished!! res: ", e));
 
 const test0 = effect("test0");
@@ -143,7 +159,13 @@ const dostuff = perform(test1("hi0"))((hi0) =>
     )
   )
 );
-
+const dostuff2 = Effect.perform(function* () {
+  const hi0 = yield test1("hi0");
+  const hi1 = yield test1("hi1");
+  const hi2 = yield test0("hi2");
+  const hi3 = yield test1("hi3");
+  return hi0 + hi1 + hi2 + hi3;
+});
 const pipe = (val, ...fns) => fns.reduce((val, fn) => fn(val), val);
 const flow = (...fns) => (val) => fns.reduce((val, fn) => fn(val), val);
 const of = (value) => (then) => then(value);
@@ -186,9 +208,13 @@ const handleTest0 = handle({
     //     )
     //   )
     // )(then);
+    const test1eff = Effect.perform(function* () {
+      const sla = yield test1("owo");
+      return sla;
+    });
 
     CPS.do(function* () {
-      const e = yield exec(perform(test1("owo"))((sla) => done(sla)));
+      const e = yield exec(test1eff);
       const res = yield k(val);
       return "~" + res + "~" + e;
     })(then);
@@ -205,12 +231,17 @@ const handleTest1 = handle({
     exec(done(val + ".t1"))(then);
   },
   test1: (val, exec, k, then) => {
-    k(val)((res) => {
-      exec(done("(" + res + ")"))(then);
-    });
+    CPS.do(function* () {
+      const res = yield k(val);
+      const withParenthesis = yield exec(done("(" + res + ")"));
+      return withParenthesis;
+    })(then);
+    // k(val)((res) => {
+    //   exec(done("(" + res + ")"))(then);
+    // });
   }
 });
 
-const program2 = handleTest1(handleTest0(dostuff));
+const program2 = handleTest1(handleTest0(dostuff2));
 
 run(program2, console.log);
