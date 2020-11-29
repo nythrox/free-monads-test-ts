@@ -150,27 +150,49 @@ const of = (value) => (then) => then(value);
 const chain = (chainer) => (cps) => (then) => cps((val) => chainer(val)(then));
 const map = (mapper) => chain(flow(mapper, of));
 
+const CPS = {
+  do(fun) {
+    function run(history) {
+      const it = fun();
+      let state = it.next();
+      history.forEach((val) => {
+        state = it.next(val);
+      });
+      if (state.done) {
+        return of(state.value);
+      }
+      return chain((val) => {
+        return run([...history, val]);
+      })(state.value);
+    }
+    return run([]);
+  },
+  map,
+  of,
+  chain
+};
+
 const handleTest0 = handle({
   return: (val, exec, then) => {
     then(val + ".t0");
   },
   test0: (val, exec, k, then) => {
-    pipe(
-      exec(perform(test1("owo"))((sla) => done(sla))),
-      chain((e) =>
-        pipe(
-          k(val),
-          map((res) => "~" + res + "~" + e)
-        )
-      )
-      /*
-        CPS.do(function*() {
-          const e = yield* perform(test1("owo"))((sla) => done(sla));
-          const res = yield* k(val)
-          return "~" + res + "~" + e
-        })(then)
-      */
-    )(then);
+    // pipe(
+    //   exec(perform(test1("owo"))((sla) => done(sla))),
+    //   CPS.chain((e) =>
+    //     pipe(
+    //       k(val),
+    //       CPS.map((res) => "~" + res + "~" + e)
+    //     )
+    //   )
+    // )(then);
+
+    CPS.do(function* () {
+      const e = yield exec(perform(test1("owo"))((sla) => done(sla)));
+      const res = yield k(val);
+      return "~" + res + "~" + e;
+    })(then);
+
     // exec(perform(test1("owo"))((e) => done(e)))((e) => {
     //   k(val)((res) => {
     //     then("~" + res + "~" + e);
