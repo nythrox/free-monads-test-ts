@@ -1,31 +1,19 @@
 import { flow, pipe } from "./utils";
-type Perform<R> = {
-  key: PropertyKey;
-  value: any;
-  type: "perform";
-  ___willReturn: R;
-};
+export interface Effect<K extends PropertyKey = any, V = any, R = any> {
+  key: K;
+  value: V;
+  __return: R;
+}
 
-type Done<R> = {
-  value: R;
-  type: "done";
-};
-
-type Handle<R> = {
-  handlers: Record<string, any>;
-  program: Effect<R>;
-  type: "handle";
-};
-
-type Syntax<R> = Perform<R> | Done<R> | Handle<R>;
-
-const done = <R>(value: R) => ({ type: "done", value } as Syntax<R>);
 type Context<R> = {
   handlers: any[];
   prev: Context<any>;
   then: (val: R) => void;
 };
-type Effect<R> = (context: Context<R>) => void;
+interface Action<R, E extends Effect> {
+  (context: Context<R>): void;
+  [Symbol.iterator]: () => Iterator<Action<R, E>, R, any>;
+}
 
 const pop = (arr: any[]) => arr.slice(0, arr.length - 1);
 const last = (arr: any[]) => arr[arr.length - 1];
@@ -38,41 +26,52 @@ const findHandler = (key: PropertyKey) => (arr: any[]): [any, any] => {
   }
   return findHandler(key)(pop(arr));
 };
-
-const of = <R>(value: R): Effect<R> => (context) => {
-  const syntax = done(value) as Done<R>;
-  context.then(syntax.value);
+const withGen: <R, E extends Effect>(
+  action: (context: Context<R>) => void
+) => Action<R, E> = (action) => {
+  (action as any)[Symbol.iterator] = function* () {
+    console.log("yielding", action);
+    return yield action;
+  };
+  return action as any;
 };
-
-const chain = <A, B>(chainer: (val: A) => Effect<B>) => (
-  effect: Effect<A>
-): Effect<B> => (context) => {
-  effect({
-    prev: context,
-    handlers: context.handlers,
-    then: (e) => {
-      const eff2 = chainer(e);
-      eff2(context);
-    }
+const of = <R>(value: R): Action<R, never> =>
+  withGen((context) => {
+    context.then(value);
   });
-};
-const run = <R>(effect: Effect<R>, then: (val: R) => void) => {
+
+const chain = <A, B, E1 extends Effect, E2 extends Effect>(
+  chainer: (val: A) => Action<B, E1>
+) => (effect: Action<A, E2>): Action<B, E1 | E2> =>
+  withGen((context) => {
+    effect({
+      prev: context,
+      handlers: context.handlers,
+      then: (e) => {
+        const eff2 = chainer(e);
+        eff2(context);
+      }
+    });
+  });
+const run = <R>(effect: Action<R, never>, then: (val: R) => void) => {
   effect({
     prev: undefined as any,
     handlers: [],
     then
   });
 };
-const map = <A, A2>(mapper: (val: A) => A2) => (
-  effect: Effect<A>
-): Effect<A2> => pipe(effect, chain(flow(mapper, of)));
-const perform = <R>(key: PropertyKey) => <T>(value: T) =>
-  ((context) => {
+const map = <A, A2, E extends Effect>(mapper: (val: A) => A2) => (
+  effect: Action<A, E>
+): Action<A2, E> => pipe(effect, chain(flow(mapper, of)));
+const perform = <E extends Effect<any>>(key: PropertyKey) => <T>(
+  value: T
+): Action<E["__return"], E> =>
+  withGen((context) => {
     const [handler, handlerCtx] = findHandler(key)(context.handlers);
     handler(
       value,
       // exec
-      (eff: Effect<any>) => (then: (val: any) => void) => {
+      (eff: Action<any, any>) => (then: (val: any) => void) => {
         const effectCtx = {
           prev: handlerCtx,
           handlers: handlerCtx.prev.handlers,
@@ -89,19 +88,31 @@ const perform = <R>(key: PropertyKey) => <T>(value: T) =>
       // instead of returning to parent, return to the handlers parent
       handlerCtx.prev.then
     );
-  }) as Effect<R>;
+  });
 
-const handler = (handlers: Record<PropertyKey, any>) => <R>(
-  program: Effect<R>
-) =>
-  ((context) => {
+const handler = <HandleE extends Effect, R>() => <R2, E2 extends Effect>(
+  ret: {
+    return: (value: HandleE["value"]) => Action<R2, E2>;
+  },
+  handlers: {
+    [val in HandleE["key"]]: (
+      value: HandleE["value"],
+      exec: any,
+      resume: (
+        value: HandleE["__return"]
+      ) => (next: (value: R) => void) => void,
+      then: (val: R2) => void
+    ) => void;
+  }
+) => <E extends Effect>(program: Action<R, E>): Action<R2, E> =>
+  withGen((context) => {
     const programBeingHandledCtx = {
       prev: context,
       handlers: (undefined as any) as any[],
-      then: (val) => {
-        if (handlers.return) {
-          handlers.return(val)(context);
-        } else of(val)(context);
+      then: (val: any) => {
+        // if (ret.return) {
+        ret.return(val)(context);
+        // } else of(val)(context);
       }
     };
     programBeingHandledCtx.handlers = [
@@ -112,11 +123,13 @@ const handler = (handlers: Record<PropertyKey, any>) => <R>(
       }
     ];
     program(programBeingHandledCtx);
-  }) as Effect<R>;
-  
+  });
+
 const Effect = {
-  do<R>(fun: () => Generator<Effect<any>, R, any>) {
-    function run(history: any[]): Effect<R> {
+  do<R, E extends Effect>(
+    fun: () => Generator<Action<any, E>, R, any>
+  ): Action<R, E> {
+    function run(history: any[]): Action<R, E> {
       const it = fun();
       let state = it.next();
       history.forEach((val) => {
@@ -135,37 +148,42 @@ const Effect = {
     return run([]);
   }
 };
-const test0 = perform("test0");
-const test1 = perform("test1");
+
+interface Test0 extends Effect<"test0", string, string> {}
+interface Test1 extends Effect<"test1", string, string> {}
+const test0 = perform<Test0>("test0");
+const test1 = perform<Test1>("test1");
 
 const dostuff = Effect.do(function* () {
-  const hi0 = yield test1("hi0");
-  const hi1 = yield test1("hi1");
-  const hi2 = yield test0("hi2");
-  const hi3 = yield test0("hi3");
+  const hi0 = yield* test1("hi0");
+  const hi1 = yield* test1("hi1");
+  const hi2 = yield* test0("hi2");
+  const hi3 = yield* test0("hi3");
   return hi0 + hi1 + hi2 + hi3;
 });
 
-const handleTest0 = handler({
-  return(val) {
-    return of(val + ".t0");
-  },
-  test0(val, exec, resume, then) {
-    resume(val)((res) => {
-      then("~" + res + "~");
-    });
+const handleTest0 = handler<Test0, string>()(
+  { return: (val) => of(val + ".t0") },
+  {
+    test0(val, exec, resume, then) {
+      resume(val)((res) => {
+        then("~" + res + "~");
+      });
+    }
   }
-});
+);
 
-const handleTest1 = handler({
-  return(val) {
-    return of(val + ".t1");
+const handleTest1 = handler<Test1, string>()(
+  {
+    return: (val) => of(val + ".t1")
   },
-  test1(val, exec, resume, then) {
-    resume(val)((res) => {
-      then("(" + res + ")");
-    });
+  {
+    test1(val, exec, resume, then) {
+      resume(val)((res) => {
+        then("(" + res + ")");
+      });
+    }
   }
-});
+);
 
 const program = run(handleTest1(handleTest0(dostuff)), console.log);
