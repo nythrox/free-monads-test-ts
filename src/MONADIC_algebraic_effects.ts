@@ -1,3 +1,4 @@
+import { HandleEffect } from './agoravai';
 import { flow, pipe } from './utils';
 export interface Effect<K extends PropertyKey = any, V = any, R = any> {
   key: K;
@@ -11,6 +12,7 @@ type Context<R> = {
   then: (val: R) => void;
 };
 export interface Action<R, E extends Effect> {
+  ___effects?: E;
   (context: Context<R>): void;
   [Symbol.iterator]: () => Iterator<Action<R, E>, R, any>;
 }
@@ -102,7 +104,7 @@ export const handler = <HandleE extends Effect, R>() => <R2, E2 extends Effect>(
       then: (val: R2) => void,
     ) => void;
   },
-) => <E extends Effect>(program: Action<R, E>): Action<R2, E> =>
+) => <E extends Effect>(program: Action<R, E | HandleE>): Action<R2, E> =>
   withGen((context) => {
     const programBeingHandledCtx = {
       prev: context,
@@ -143,7 +145,7 @@ export const Effect = {
       // });
       return chain((val) => {
         return run([...history, val]);
-      })(state.value);
+      })(state.value) as any
     }
     return run([]);
   },

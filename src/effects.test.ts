@@ -11,8 +11,8 @@ interface Log extends OP<void, 'log', { args: any[]; method: 'log' }> {}
 interface StateGet<T> extends OP<T, 'state', { method: 'get' }> {}
 interface StateSet<T> extends OP<void, 'state', { value: T; method: 'set' }> {}
 interface Wait<T extends number> extends OP<T, 'wait', { milliseconds: T }> {}
-interface Async<T> extends OP<T, 'resolve', { promise: Promise<T> }> {}
-interface Amb extends OP<any, 'list', { list: Amb }> {}
+interface Await<T> extends OP<T, 'resolve', { promise: Promise<T> }> {}
+interface ForEach<T> extends OP<any, 'list', { list: List<T> }> {}
 // todo:
 /**
  
@@ -41,7 +41,7 @@ export function wait<T extends number>(milliseconds: T) {
 }
 
 export function resolve<T>(promise: Promise<T>) {
-  return op<Async<T>>('resolve', { promise });
+  return op<Await<T>>('resolve', { promise });
 }
 
 function* main() {
@@ -216,7 +216,7 @@ export function withWait<G extends GEN, Milliseconds extends number>(
 }
 
 export function async<G extends GEN, V>(comp: G) {
-  return withHandler<G, Async<V>>(comp, {
+  return withHandler<G, Await<V>>(comp, {
     *resolve(data: { promise: Promise<V> }, cont) {
       yield (parent: GEN) => {
         data.promise.then((val) => {
@@ -227,8 +227,12 @@ export function async<G extends GEN, V>(comp: G) {
     },
   });
 }
+interface Effect<A, B> {}
+const eff = <Effs, A>(g: () => Generator<Effs, A>): Effect<Error, A> => ({});
 
-const movies = function* () {
+// Algebraic effects in Typescript
+// movies: Effect<{ movie: Movie, credit: Credit, actor: Person}, ForEach<Number> | ForEach<Movie> | Await<Person> | ...>
+const movies = eff(function* () {
   const page = yield* List(1, 2, 3, 4, 5);
   const movies = yield* TMBDAPI.discover({
     sorting: 'popularity-desc',
@@ -236,24 +240,30 @@ const movies = function* () {
     releasedBefore: '15126123',
   });
   const movie = yield* movies;
-  const credits = yield* TMBDAPI.movieCredits(movie.id);
-  const actors = yield* TMBDAPI.person((yield* credits).id);
-  return { movie, credits, actors };
-};
+  const allCredits = yield* TMBDAPI.movieCredits(movie.id);
+  const credit = yield* allCredits;
+  const actor = yield* TMBDAPI.person(credit.id);
+  return { movie, credit, actor };
+});
 
 type Movie = {
   id: string;
+  type: 'movie';
 };
-type Credits = {
+type Credit = {
+  id: string;
+  type: 'credits';
+};
+type Person = {
+  type: 'person';
   id: string;
 };
-type Person = {};
-type List<T> = Generator<Amb, T, any>;
+type List<T> = Generator<ForEach<T>, T, any>;
 declare function List<T extends any[]>(...args: T): List<T[number]>;
 declare const TMBDAPI: {
-  discover: (args: any) => Generator<Async<List<Movie>>, List<Movie>>;
-  movieCredits: (arg: any) => Generator<Async<List<Credits>>, List<Credits>>;
-  person: (arg: any) => Generator<Async<Person>, Person, any>;
+  discover: (args: any) => Generator<Await<List<Movie>>, List<Movie>>;
+  movieCredits: (arg: any) => Generator<Await<List<Credit>>, List<Credit>>;
+  person: (arg: any) => Generator<Await<Person>, Person, any>;
 };
 function* hey() {
   yield* op('hi1', 10);
