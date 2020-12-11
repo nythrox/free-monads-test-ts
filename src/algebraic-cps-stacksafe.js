@@ -50,6 +50,14 @@ const c = function (chainer) {
   Callback.prototype.chain = c;
   Callback.prototype.map = m;
   
+  class MultiCallback {
+    constructor(callback) {
+      this.callback = callback;
+    }
+  }
+  MultiCallback.prototype.chain = c;
+  MultiCallback.prototype.map = m;
+  
   export const of = (value) => new Of(value);
   
   export const chain = (chainer) => (action) => new Chain(chainer, action);
@@ -65,7 +73,7 @@ const c = function (chainer) {
   const resume = (value) => new Resume(value);
   
   const callback = (callback) => new Callback(callback);
-  
+  const handlerMulti = (callback) => new MultiCallback(callback);
   const pipe = (a, ...fns) => fns.reduce((res, fn) => fn(res), a);
   
   const findHandler = (key) => (arr) => (reject) => {
@@ -86,13 +94,14 @@ const c = function (chainer) {
   
   // todo: callback that can return void (single) or return another callback
   class Interpreter {
-    constructor(action, onDone, onError) {
-      this.context = {
-        prev: undefined,
-        resume: undefined,
-        action,
-        handlers: []
-      };
+    constructor(action, onDone, onError, context) {
+      if (!context)
+        this.context = {
+          prev: undefined,
+          resume: undefined,
+          action,
+          handlers: []
+        };
       this.onError = onError;
       this.onDone = onDone;
     }
@@ -135,6 +144,11 @@ const c = function (chainer) {
             }
             break;
           }
+          case Of: {
+            this.return(action.value, context);
+            break;
+          }
+  
           case Callback: {
             this.context = undefined;
             action.callback((value) => {
@@ -143,36 +157,38 @@ const c = function (chainer) {
             });
             break;
           }
-          case Of: {
-            this.return(action.value, context);
-            break;
-          }
+          case MultiCallback: {
+            this.context = undefined;
+            // action.callback((newAction) => {
+            //   this.context = {
+            //     handlers: context.handlers,
+            //     prev: context,
+            //     resume: context.resume,
+            //     action: newAction
+            //   };
+            //   this.run();
+            // });
   
-          case Handler: {
-            const { handlers, program } = action;
-            if (!this.hasValue) {
-              this.context = {
-                prev: context,
-                action: program,
-                resume: context.resume,
-                handlers: [
-                  ...context.handlers,
-                  {
-                    handlers,
-                    context
-                  }
-                ]
-              };
-            } else if (this.hasValue) {
-              const ret = handlers.return ? handler.return : (val) => new Of(val);
-              this.context = {
-                resume: context.resume,
-                handlers: context.handlers,
-                prev: context.prev,
-                action: ret(this.value)
-              };
-              this.doneReturning();
-            }
+            // action.callback(
+            //   (value) => {
+            //     const { resume } = context;
+            //     if (!resume) {
+            //       this.onError(Error("using resume outside of handler"));
+            //       return;
+            //     }
+            //     resume.handlerCtx.prev = context.prev;
+            //     this.context = resume.programCtx.prev;
+            //     this.hasValue = true;
+            //     this.value = value;
+            //     new Interpreter(resume(value), () => {}, this.onError, {
+            //       handlers: context.handlers,
+            //       prev: context,
+            //       resume: context.resume,
+            //       action: newAction
+            //     });
+            //   }, // resume
+            //   0 // done
+            // );
             break;
           }
           case Perform: {
@@ -193,6 +209,35 @@ const c = function (chainer) {
               }
             };
   
+            break;
+          }
+          case Handler: {
+            const { handlers, program } = action;
+            if (!this.hasValue) {
+              this.context = {
+                prev: context,
+                action: program,
+                resume: context.resume,
+                handlers: [
+                  ...context.handlers,
+                  {
+                    handlers,
+                    context
+                  }
+                ]
+              };
+            } else if (this.hasValue) {
+              const ret = handlers.return
+                ? handlers.return
+                : (val) => new Of(val);
+              this.context = {
+                resume: context.resume,
+                handlers: context.handlers,
+                prev: context.prev,
+                action: ret(this.value)
+              };
+              this.doneReturning();
+            }
             break;
           }
           case Resume: {
@@ -265,6 +310,97 @@ const c = function (chainer) {
       EffTime < PromiseTime ? "eff" : "promise"
     );
   }
+  const toArray = handler({
+    return: (val) => of([val]),
+    foreach: (array) => {
+      const nextInstr = (arr, newArr = []) => {
+        const [first, ...rest] = arr;
+        if (arr.length === 0) {
+          return of(newArr);
+        } else
+          return resume(first)
+            .map((val) => [...newArr, ...val])
+            .chain((newArr) => nextInstr(rest, newArr));
+      };
+      return nextInstr(array);
+    }
+  });
+  const stream = (...initials) => {
+    const self = {
+      history: initials,
+      listen: function (callback) {
+        this.history.forEach((item) => callback(item));
+        this.listeners.push(callback);
+      },
+      concat: function (stream) {
+        this.history = [...this.history, ...stream.history];
+        stream.listen((n) => {
+          self.push(n);
+        });
+      },
+      push: function (item) {
+        this.history.push(item);
+        this.listeners.forEach((fn) => fn(item));
+      },
+      listeners: [],
+      disposeFns: [],
+      onDispose: function (fn) {
+        this.disposeFns.push(fn);
+      },
+      dispose: function () {
+        this.disposeFns.forEach((fn) => fn());
+      }
+    };
+    return self;
+  };
+  // const str = stream();
+  // str.onDispose(() => console.log("finished"));
+  // str.push(1);
+  // str.push(2);
+  // str.listen(console.log);
+  // str.dispose();
+  const toStream = handler({
+    return: (val) => of(stream(val)),
+    stream: (stream) =>
+      handlerMulti((resume, done) => {
+        const newStream = stream();
+        stream.listen((value) => {
+          resume(value)((stream2) => {
+            stream2.listen((n) => {
+              newStream.push(n);
+            });
+          });
+        });
+        done(newStream);
+      })
+  });
+  
+  Promise.prototype.await = function () {
+    return waitFor(this);
+  };
+  
+  const wait = (seconds) =>
+    callback((done) => {
+      setTimeout(done, seconds);
+    });
+  const withHi = handler({
+    hi: () => wait(20).chain(() => resume(500).map((n) => "num: " + n))
+  });
+  const waitFor = perform("promise");
+  
+  const promise = handler({
+    return: (x) => of(x),
+    promise: (promise) => callback((done) => promise.then(done)).chain(resume)
+  });
+  
+  const foreach = perform("foreach");
+  const arr = Array.from({ length: 100 });
+  const arrProgram = promise(
+    toArray(foreach(arr).chain((n) => Promise.resolve("owo").await()))
+  );
+  
+  // run(arrProgram).then(console.log).catch(console.error);
+  
   // main();
   const repeat = (times, interval) =>
     callback((resume) => {
@@ -279,14 +415,6 @@ const c = function (chainer) {
       }, interval);
     });
   
-  const wait = (seconds) =>
-    callback((done) => {
-      setTimeout(done, seconds);
-    });
-  const withHi = handler({
-    hi: () => wait(20).chain(() => resume(500).map((n) => "num: " + n))
-  });
-  
   const hi = perform("hi");
   const program = withHi(
     hi(20)
@@ -294,7 +422,7 @@ const c = function (chainer) {
       .chain((num) => hi(10))
   );
   
-  // run(program).then(console.log).catch(console.error);
+  run(program).then(console.log).catch(console.error);
   
   function a(n) {
     if (n === 1) {
@@ -308,7 +436,7 @@ const c = function (chainer) {
     );
   }
   
-  run(a(1000))
-    .then(() => console.log("done6s"))
-    .catch(console.error);
+  // run(a(1000))
+  //   .then(() => console.log("done6s"))
+  //   .catch(console.error);
   
