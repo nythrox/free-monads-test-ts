@@ -105,6 +105,7 @@ class Interpreter {
     while (this.context) {
       const action = this.context.action;
       const context = this.context;
+      console.log(action);
       switch (action.constructor) {
         case Chain: {
           // const nested = action.after;
@@ -123,19 +124,12 @@ class Interpreter {
             handlers: context.handlers,
             prev: context,
             resume: context.resume,
-            action: action.after,
-            nextInstruction: (value) => ({
-              handlers: context.handlers,
-              prev: context.prev,
-              resume: context.resume,
-              nextInstruction: context.nextInstruction,
-              action: action.chainer(value)
-            })
+            action: action.after
           };
           break;
         }
         case Of: {
-          this.nextInstruction(action.value, context);
+          this.return(action.value, context);
           break;
         }
 
@@ -154,7 +148,7 @@ class Interpreter {
             },
             // done
             (value) => {
-              this.nextInstruction(value, context);
+              this.return(value, context);
               // this.return(value, context);
               if (self.isPaused) {
                 this.run();
@@ -169,13 +163,6 @@ class Interpreter {
             prev: context,
             action: program,
             resume: context.resume,
-            nextInstruction: (value) => ({
-              resume: context.resume,
-              handlers: context.handlers,
-              prev: context,
-              nextInstruction: context.nextInstruction,
-              action: handlers.return ? handlers.return(value) : new Of(value)
-            }),
             handlers: [
               ...context.handlers,
               {
@@ -222,9 +209,10 @@ class Interpreter {
           // 2. continue the main program with resumeValue,
           // and when it finishes, let it go all the way through the *return* transformation proccess
           // /\ it goes all the way beacue it goes to programCtx.prev (before perform) that will eventuallyfall to transform
-          this.context = programCtx.nextInstruction(value);
+          // this.context = programCtx.nextInstruction(value);
+          this.return(value, programCtx);
           // this.nextInstruction(value, programCtx);
-          //3. after the transformation is done, return to the person chaining `resume`
+          // 3. after the transformation is done, return to the person chaining `resume`
           // /\ when the person chaining resume (activatedHandlerCtx) is done, it will return to the transform's parent
           transformCtx.prev = context.prev;
           break;
@@ -237,9 +225,31 @@ class Interpreter {
     }
     this.isPaused = true;
   }
-  nextInstruction(value, context) {
-    if (context.nextInstruction) {
-      this.context = context.nextInstruction(value);
+  return(value, context) {
+    const prev = context.prev;
+    if (prev) {
+      switch (context.prev.action.constructor) {
+        case Handler: {
+          const { handlers } = prev.action;
+          this.context = {
+            resume: prev.resume,
+            handlers: prev.handlers,
+            prev: prev.prev,
+            nextInstruction: prev.nextInstruction,
+            action: handlers.return ? handlers.return(value) : new Of(value)
+          };
+          break;
+        }
+        case Chain: {
+          this.context = {
+            handlers: prev.handlers,
+            prev: prev.prev,
+            resume: prev.resume,
+            action: prev.action.chainer(value)
+          };
+          break;
+        }
+      }
     } else {
       this.onDone(value);
       this.context = undefined;
@@ -433,4 +443,47 @@ const program = withHiMulti(
     .chain((num) => hi(10).map((n) => [num, n]))
 );
 
-run(program).then(console.log).catch(console.error);
+// run(program).then(console.log).catch(console.error);
+
+const test1 = perform("test1");
+const test2 = perform("test2");
+const test3 = perform("test3");
+
+const withTest1 = handler({
+  // return(val) {
+  //   return of(val + "f1");
+  // },
+  // test1: (value) =>
+  //   callback((exec, done) => {
+  //     exec(resume(value + "!"))((val) => done("~" + val + "~"));
+  //   })
+  test1: (value) => resume(value + "!").map((val) => "~" + val + "~")
+});
+const withTest2 = handler({
+  // return(val) {
+  //   return of(val + "f2");
+  // },
+  // test2: (value) =>
+  //   callback((exec, done) => {
+  //     exec(resume(value + "!"))((val) => done("+" + val + "+"));
+  //   })
+  test2: (value) => resume(value + "!").map((val) => "^" + val + "^")
+});
+const withTest3 = handler({
+  // return(val) {
+  //   return of(val + "f3");
+  // },
+  // test3: (value) =>
+  //   callback((exec, done) => {
+  //     exec(resume(value + "!"))((val) => done("(" + val + ")"));
+  //   })
+  test3: (value) => resume(value + "!").map((val) => "(" + val + ")")
+});
+
+const programhandlerscopedtest = test1("hi0").chain((hi1) =>
+  test2("hi2").chain((hi2) => test3("hi3").map((hi3) => hi1 + hi2 + hi3))
+);
+
+pipe(programhandlerscopedtest, withTest1, withTest2, withTest3, run)
+  .then(console.log)
+  .catch(console.error);
