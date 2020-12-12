@@ -73,7 +73,7 @@ export const handler = (handlers) => (program) =>
 const resume = (value) => new Resume(value);
 
 const callback = (callback) => new Callback(callback);
-const handlerMulti = (callback) => new MultiCallback(callback);
+const callbackMulti = (callback) => new MultiCallback(callback);
 const pipe = (a, ...fns) => fns.reduce((res, fn) => fn(res), a);
 
 const findHandlers = (key) => (arr) => (reject) => {
@@ -105,8 +105,11 @@ class Interpreter {
     this.context.action = action;
     this.onError = onError;
     this.onDone = onDone;
+    this.isPaused = true;
   }
   run() {
+    const self = this;
+    this.isPaused = false;
     while (this.context) {
       const action = this.context.action;
       const context = this.context;
@@ -153,22 +156,14 @@ class Interpreter {
           this.context = undefined;
           action.callback((value) => {
             this.return(value, context);
-            // this.context = context.nextCtx.apply(self, [value]);
-            this.run();
+            if (self.isPaused) {
+              this.run();
+            }
           });
           break;
         }
         case MultiCallback: {
           this.context = undefined;
-          // action.callback((newAction) => {
-          //   this.context = {
-          //     handlers: context.handlers,
-          //     prev: context,
-          //     resume: context.resume,
-          //     action: newAction
-          //   };
-          //   this.run();
-          // });
           action.callback(
             // exec
             (execAction) => (then) => {
@@ -183,7 +178,9 @@ class Interpreter {
             // done
             (value) => {
               this.return(value, context);
-              this.run();
+              if (self.isPaused) {
+                this.run();
+              }
             }
           );
           break;
@@ -258,12 +255,6 @@ class Interpreter {
           transformCtx.prev = context.prev;
           this.hasValue = true;
           this.value = value;
-          // console.log(
-          //   "hi, returning to",
-          //   this.context,
-          //   "with value",
-          //   this.value
-          // );
           break;
         }
         default: {
@@ -272,6 +263,7 @@ class Interpreter {
         }
       }
     }
+    this.isPaused = true;
   }
   return(value, context) {
     if (!context.prev) {
@@ -312,14 +304,13 @@ const run = (program) =>
   new Promise((resolve, reject) => {
     new Interpreter(program, resolve, reject).run();
   });
+const e = callbackMulti((exec, done) => {
+  // Promise.resolve().then(done);
+  done();
+});
 function eff(n) {
-  if (n < 1)
-    return callback((done) => {
-      setTimeout(() => done(), 0);
-    });
-  return callback((done) => {
-    setTimeout(() => done(), 0);
-  }).chain(() => eff(n - 1));
+  if (n < 1) return e;
+  return e.chain(() => eff(n - 1));
 }
 
 function p(n) {
@@ -345,21 +336,6 @@ async function main() {
     EffTime < PromiseTime ? "eff" : "promise"
   );
 }
-const toArray = handler({
-  return: (val) => of([val]),
-  foreach: (array) => {
-    const nextInstr = (arr, newArr = []) => {
-      const [first, ...rest] = arr;
-      if (arr.length === 0) {
-        return of(newArr);
-      } else
-        return resume(first)
-          .map((val) => [...newArr, ...val])
-          .chain((newArr) => nextInstr(rest, newArr));
-    };
-    return nextInstr(array);
-  }
-});
 const stream = (initials) => {
   const self = {
     history: initials ? initials : [],
@@ -393,7 +369,7 @@ const foreachStream = perform("foreachStream");
 const toStream = handler({
   return: (val) => of(stream([val])),
   foreachStream: (str) =>
-    handlerMulti((exec, done) => {
+    callbackMulti((exec, done) => {
       const newStream = stream();
       str.listen((value) => {
         exec(resume(value))((stream2) => {
@@ -431,12 +407,48 @@ const promise = handler({
   promise: (promise) => callback((done) => promise.then(done)).chain(resume)
 });
 
-const foreach = perform("foreach");
-const arr = Array.from({ length: 100 });
-const arrProgram = promise(
-  toArray(foreach(arr).chain((n) => Promise.resolve("owo").await()))
-);
+const toArray = handler({
+  return: (val) => of([val]),
+  foreach: (array) => {
+    return callbackMulti((exec, done) => {
+      let newArray = [];
+      for (const item of array) {
+        exec(resume(item))((res) => {
+          for (const item of res) {
+            newArray.push(item);
+          }
+        });
+      }
+      // array.forEach((item) => {
 
+      // });
+      done(newArray);
+    });
+    // const nextInstr = (newArr = []) => {
+    //   // const [first, ...rest] = arr;
+    //   if (array.length === 0) {
+    //     return of(newArr);
+    //   } else {
+    //     const first = array.shift();
+    //     return (
+    //       resume(first)
+    //         //.map(a => [...newArr, ...a])
+    //         .chain((a) => {
+    //           for (const item of a) {
+    //             newArr.push(item);
+    //           }
+    //           return nextInstr(newArr);
+    //         })
+    //     );
+    //   }
+    // };
+    return nextInstr(array);
+  }
+});
+
+const foreach = perform("foreach");
+const arr = Array.from({ length: 10000 });
+const arrProgram = toArray(foreach(arr).map(() => 1));
 // run(arrProgram).then(console.log).catch(console.error);
 
 main();
@@ -458,7 +470,7 @@ const withHi = handler({
 });
 const withHiMulti = handler({
   hi: (value) =>
-    handlerMulti((exec, done) => {
+    callbackMulti((exec, done) => {
       exec(resume(value))((o1) => {
         exec(resume(value + 1))((o2) => {
           done([...o1, ...o2]);
