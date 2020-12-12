@@ -42,13 +42,6 @@ class Resume {
 }
 Resume.prototype.chain = c;
 Resume.prototype.map = m;
-class Callback {
-  constructor(callback) {
-    this.callback = callback;
-  }
-}
-Callback.prototype.chain = c;
-Callback.prototype.map = m;
 
 class MultiCallback {
   constructor(callback) {
@@ -72,8 +65,7 @@ export const handler = (handlers) => (program) =>
 
 const resume = (value) => new Resume(value);
 
-const callback = (callback) => new Callback(callback);
-const callbackMulti = (callback) => new MultiCallback(callback);
+const callback = (callback) => new MultiCallback(callback);
 const pipe = (a, ...fns) => fns.reduce((res, fn) => fn(res), a);
 
 const findHandlers = (key) => (arr) => (reject) => {
@@ -115,53 +107,38 @@ class Interpreter {
       const context = this.context;
       switch (action.constructor) {
         case Chain: {
-          if (!this.hasValue) {
-            // const nested = action.after;
-            // switch (nested.type) {
-            //   case "of": {
-            //     this.context = {
-            //       handlers: context.handlers,
-            //       prev: context.prev,
-            //       resume: context.resume,
-            //       action: action.chainer(nested.value)
-            //     };
-            //     break;
-            //   }
-            //   default: {}}
-            this.context = {
-              handlers: context.handlers,
-              prev: context,
-              resume: context.resume,
-              action: action.after
-            };
-            break;
-          } else if (this.hasValue) {
-            this.context = {
+          // const nested = action.after;
+          // switch (nested.type) {
+          //   case "of": {
+          //     this.context = {
+          //       handlers: context.handlers,
+          //       prev: context.prev,
+          //       resume: context.resume,
+          //       action: action.chainer(nested.value)
+          //     };
+          //     break;
+          //   }
+          //   default: {}}
+          this.context = {
+            handlers: context.handlers,
+            prev: context,
+            resume: context.resume,
+            action: action.after,
+            nextInstruction: (value) => ({
               handlers: context.handlers,
               prev: context.prev,
               resume: context.resume,
-              action: action.chainer(this.value)
-            };
-            this.doneReturning();
-          }
+              nextInstruction: context.nextInstruction,
+              action: action.chainer(value)
+            })
+          };
           break;
         }
         case Of: {
-          // this.context = context.nextCtx.apply(this, [action.value]);
-          this.return(action.value, context);
+          this.nextInstruction(action.value, context);
           break;
         }
 
-        case Callback: {
-          this.context = undefined;
-          action.callback((value) => {
-            this.return(value, context);
-            if (self.isPaused) {
-              this.run();
-            }
-          });
-          break;
-        }
         case MultiCallback: {
           this.context = undefined;
           action.callback(
@@ -177,7 +154,8 @@ class Interpreter {
             },
             // done
             (value) => {
-              this.return(value, context);
+              this.nextInstruction(value, context);
+              // this.return(value, context);
               if (self.isPaused) {
                 this.run();
               }
@@ -187,31 +165,26 @@ class Interpreter {
         }
         case Handler: {
           const { handlers, program } = action;
-          if (!this.hasValue) {
-            this.context = {
-              prev: context,
-              action: program,
-              resume: context.resume,
-              handlers: [
-                ...context.handlers,
-                {
-                  handlers,
-                  context
-                }
-              ]
-            };
-          } else if (this.hasValue) {
-            const ret = handlers.return
-              ? handlers.return
-              : (val) => new Of(val);
-            this.context = {
+          this.context = {
+            prev: context,
+            action: program,
+            resume: context.resume,
+            nextInstruction: (value) => ({
               resume: context.resume,
               handlers: context.handlers,
-              prev: context.prev,
-              action: ret(this.value)
-            };
-            this.doneReturning();
-          }
+              prev: context,
+              nextInstruction: context.nextInstruction,
+              action: handlers.return ? handlers.return(value) : new Of(value)
+            }),
+            handlers: [
+              ...context.handlers,
+              {
+                handlers,
+                context
+              }
+            ]
+          };
+
           break;
         }
         case Perform: {
@@ -249,12 +222,11 @@ class Interpreter {
           // 2. continue the main program with resumeValue,
           // and when it finishes, let it go all the way through the *return* transformation proccess
           // /\ it goes all the way beacue it goes to programCtx.prev (before perform) that will eventuallyfall to transform
-          this.context = programCtx.prev;
+          this.context = programCtx.nextInstruction(value);
+          // this.nextInstruction(value, programCtx);
           //3. after the transformation is done, return to the person chaining `resume`
           // /\ when the person chaining resume (activatedHandlerCtx) is done, it will return to the transform's parent
           transformCtx.prev = context.prev;
-          this.hasValue = true;
-          this.value = value;
           break;
         }
         default: {
@@ -265,57 +237,33 @@ class Interpreter {
     }
     this.isPaused = true;
   }
-  return(value, context) {
-    if (!context.prev) {
+  nextInstruction(value, context) {
+    if (context.nextInstruction) {
+      this.context = context.nextInstruction(value);
+    } else {
       this.onDone(value);
       this.context = undefined;
-    } else {
-      this.context = context.prev;
-      this.hasValue = true;
-      this.value = value;
     }
-  }
-  doneReturning() {
-    this.hasValue = false;
-    this.value = undefined;
   }
 }
-const ctx = {
-  handlers: [],
-  prev: undefined,
-  resume: {
-    transformCtx: {},
-    programCtx: {
-      prev: {
-        action: chain((e) => of(e))()
-      }
-    }
-  }
-};
-new Interpreter(
-  resume(10),
-  (res) => console.log("done", res),
-  console.error,
-  ctx
-);
-// .run();
-
 const run = (program) =>
   new Promise((resolve, reject) => {
     new Interpreter(program, resolve, reject).run();
   });
-const e = callbackMulti((exec, done) => {
-  // Promise.resolve().then(done);
-  done();
-});
-function eff(n) {
-  if (n < 1) return e;
-  return e.chain(() => eff(n - 1));
-}
 
+const effect = () => callback((exec, done) => done());
+const promise = () =>
+  new Promise((resolve, reject) => {
+    resolve();
+  });
+
+function eff(n) {
+  if (n < 1) return effect();
+  return effect().chain(() => eff(n - 1));
+}
 function p(n) {
-  if (n < 1) return Promise.resolve();
-  return Promise.resolve().then(() => p(n - 1));
+  if (n < 1) return promise();
+  return promise().then(() => p(n - 1));
 }
 
 async function main() {
@@ -336,6 +284,7 @@ async function main() {
     EffTime < PromiseTime ? "eff" : "promise"
   );
 }
+// main();
 const stream = (initials) => {
   const self = {
     history: initials ? initials : [],
@@ -369,7 +318,7 @@ const foreachStream = perform("foreachStream");
 const toStream = handler({
   return: (val) => of(stream([val])),
   foreachStream: (str) =>
-    callbackMulti((exec, done) => {
+    callback((exec, done) => {
       const newStream = stream();
       str.listen((value) => {
         exec(resume(value))((stream2) => {
@@ -397,20 +346,21 @@ Promise.prototype.await = function () {
 };
 
 const wait = (seconds) =>
-  callback((done) => {
+  callback((exec, done) => {
     setTimeout(done, seconds);
   });
 const waitFor = perform("promise");
 
-const promise = handler({
+const withPromise = handler({
   return: (x) => of(x),
-  promise: (promise) => callback((done) => promise.then(done)).chain(resume)
+  promise: (promise) =>
+    callback((exec, done) => promise.then(done)).chain(resume)
 });
 
 const toArray = handler({
   return: (val) => of([val]),
   foreach: (array) => {
-    return callbackMulti((exec, done) => {
+    return callback((exec, done) => {
       let newArray = [];
       for (const item of array) {
         exec(resume(item))((res) => {
@@ -419,9 +369,6 @@ const toArray = handler({
           }
         });
       }
-      // array.forEach((item) => {
-
-      // });
       done(newArray);
     });
     // const nextInstr = (newArr = []) => {
@@ -451,9 +398,9 @@ const arr = Array.from({ length: 10000 });
 const arrProgram = toArray(foreach(arr).map(() => 1));
 // run(arrProgram).then(console.log).catch(console.error);
 
-main();
+// main();
 const repeat = (times, interval) =>
-  callback((resume) => {
+  callback((exec, resume) => {
     let int = 1;
     const id = setInterval(() => {
       if (int === times) {
@@ -470,7 +417,7 @@ const withHi = handler({
 });
 const withHiMulti = handler({
   hi: (value) =>
-    callbackMulti((exec, done) => {
+    callback((exec, done) => {
       exec(resume(value))((o1) => {
         exec(resume(value + 1))((o2) => {
           done([...o1, ...o2]);
@@ -481,25 +428,9 @@ const withHiMulti = handler({
 });
 const hi = perform("hi");
 const program = withHiMulti(
-  hi(0)
-    // .map((n) => n * 2)
+  hi(1)
+    .map((n) => n * 2)
     .chain((num) => hi(10).map((n) => [num, n]))
 );
 
-// run(program).then(console.log).catch(console.error);
-
-function a(n) {
-  if (n === 1) {
-    // return callback((done) => setTimeout(() => done(1), 0));
-    return callback((done) => Promise.resolve(1).then(done));
-    // return of(1);
-  }
-  // return of(1).chain(() => a(n - 1));
-  return callback((done) => Promise.resolve(1).then(done)).chain(() =>
-    a(n - 1)
-  );
-}
-
-// run(a(1000))
-//   .then(() => console.log("done6s"))
-//   .catch(console.error);
+run(program).then(console.log).catch(console.error);
