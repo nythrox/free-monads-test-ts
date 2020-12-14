@@ -100,7 +100,6 @@ const findHandlers = (key) => (arr) => (reject) => {
   }
   return handlers;
 };
-
 // todo: callback that can return void (single) or return another callback
 class Interpreter {
   constructor(onDone, onError, context) {
@@ -114,7 +113,7 @@ class Interpreter {
     while (this.context) {
       const action = this.context.action;
       const context = this.context;
-      console.log(action);
+      // console.log(action);
       switch (action.constructor) {
         case Chain: {
           // const nested = action.after;
@@ -152,28 +151,42 @@ class Interpreter {
           break;
         }
         case FinishHandler: {
-          this.return(action.value, context);
+          // console.log("stopping", this);
+          this.context = undefined;
+          const { callback, value } = action.value;
+          // console.log("calling", callback.toString(), "with", value);
+          callback(value);
+          // this.done()
+          // this.return(action.value, context);
           break;
         }
         case MultiCallback: {
           this.context = undefined;
           action.callback(
             // exec
-            (execAction) => {
+            (execAction) => (then) => {
               const ctx = {
                 prev: context.prev,
                 resume: context.resume,
                 handlers: context.handlers,
-                action: execAction
+                action: execAction.chain((n) =>
+                  finishHandler({ callback: then, value: n })
+                )
               };
-              new Interpreter(this.onDone, this.onError, ctx).run();
+              const i = new Interpreter(this.onDone, this.onError, ctx);
+              i.isClone = true;
+              i.run();
             },
             // done
             (value) => {
-              // this.return(value, context);
-              // if (this.isPaused) {
-              //   this.run();
-              // }
+              if (this.isClone && !context.prev) {
+                this.onDone(value);
+              } else {
+                this.return(value, context);
+                if (this.isPaused) {
+                  this.run();
+                }
+              }
             }
           );
           break;
@@ -270,6 +283,7 @@ class Interpreter {
         }
         default: {
           this.onError("invalid state");
+          console.log("invalid state!!");
         }
       }
     } else {
@@ -350,7 +364,7 @@ const stream = (initials) => {
   };
   return self;
 };
-const str = stream(Array.from({ length: 100000 }));
+const str = stream(Array.from({ length: 10 }));
 const foreachStream = perform("foreachStream");
 const toStream = handler({
   return: (val) => of(stream([val])),
@@ -488,8 +502,8 @@ const withTest2 = handler({
   return: (val) => of(val + "f2"),
   test2: (value) =>
     callback((exec, done) => {
-      exec(resume(value + "!").chain((val) => finishHandler("+" + val + "+")));
-      // ((val) => done("+" + val + "+"));
+      exec(resume(value + "!"))((val) => done("+" + val + "+"));
+      // .chain((val) => finishHandler("+" + val + "+")));
     })
 
   // test2: (value) =>
@@ -504,8 +518,13 @@ const withTest3 = handler({
   return: (val) => of(val + "f3"),
   test3: (value) =>
     callback((exec, done) => {
-      // exec(resume(value + "!"))((val) => done("(" + val + ")"));
-      exec(resume(value + "!").chain((val) => finishHandler("(" + val + ")")));
+      exec(resume(value + "!"))((val) => done("(" + val + ")"));
+      // exec(
+      //   resume(value + "!")
+      //     // owo
+      //     .chain((val) => finishHandler("(" + val + ")"))
+      //   // owo
+      // );
     })
   // test3: (value) =>
   //   resume(value + "!").chain((val) =>
@@ -520,6 +539,95 @@ const programhandlerscopedtest = test3("hi0").chain((hi1) =>
   test2("hi2").chain((hi2) => test1("hi3").map((hi3) => hi1 + hi2 + hi3))
 );
 
-pipe(programhandlerscopedtest, withTest1, withTest2, withTest3, run)
-  .then(console.log)
-  .catch(console.error);
+export const makeMultishotGeneratorDo = (of) => (chain) => (generatorFun) => {
+  function run(history) {
+    const it = generatorFun();
+    let state = it.next();
+    history.forEach((val) => {
+      state = it.next(val);
+    });
+    if (state.done) {
+      return of(state.value);
+    }
+    return chain((val) => {
+      return run([...history, val]);
+    })(state.value);
+  }
+  return run([]);
+};
+
+export const Effect = {
+  map,
+  chain,
+  of,
+  do: makeMultishotGeneratorDo(of)(chain)
+};
+
+// pipe(programhandlerscopedtest, withTest1, withTest2, withTest3, run)
+//   .then(console.log)
+//   .catch(console.error);
+const io = perform("io");
+const awaitt = perform("async");
+const raise = perform("error");
+
+const withIo = handler({
+  return: (val) => callback((exec, done) => done(() => val)),
+  io: (io) =>
+    callback((exec, done) => {
+      exec(resume(io()))(done);
+    })
+});
+
+const toEither = handler({
+  return: (val) =>
+    callback((exec, done) => done({ type: "right", value: val })),
+  error: (err) => callback((exec, done) => done({ type: "left", error: err }))
+});
+
+const withAsyncIo = handler({
+  return: (value) => callback((exec, done) => done(Promise.resolve(value))),
+  async: (iopromise) =>
+    callback((exec, done) => {
+      exec(io(iopromise))((promise) => {
+        promise
+          .then((res) => {
+            exec(resume(res))(done);
+          })
+          .catch((err) => {
+            exec(raise(err))();
+          });
+      });
+    })
+});
+const env = perform("env");
+const withEnv = handler({
+  env: () =>
+    Effect.do(function* () {
+      const res = yield resume("jason");
+      const res2 = yield resume("nosaj");
+      return [res, res2];
+    })
+  // callback((exec, done) => {
+  //   exec(resume("jason"))((res) => {
+  //     exec(resume("nosaj"))((res2) => {
+  //       done([res, res2]);
+  //     });
+  //   });
+  // })
+});
+
+const powpow = Effect.do(function* () {
+  const name = yield env();
+  const something = yield awaitt(() => Promise.resolve(10));
+  const something2 = yield awaitt(() => Promise.resolve("err"));
+  const something3 = yield awaitt(() => Promise.resolve(10));
+  return name + something + something2 + something3;
+});
+// pipe(powpow, withEnv, withAsyncIo, toEither, withIo, run).then((io) => {
+//   const p = io();
+//   if (p.type === "left") {
+//     console.error(p);
+//   } else {
+//     p.value.then(console.log);
+//   }
+// });
