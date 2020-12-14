@@ -1,3 +1,5 @@
+//todo: make multicallback based on singlecallback, using pause and resume without creating a new itnerpreter
+
 const c = function (chainer) {
   return new Chain(chainer, this);
 };
@@ -50,7 +52,21 @@ class MultiCallback {
 }
 MultiCallback.prototype.chain = c;
 MultiCallback.prototype.map = m;
-
+class SingleCallback {
+  constructor(callback) {
+    this.callback = callback;
+  }
+}
+SingleCallback.prototype.chain = c;
+SingleCallback.prototype.map = m;
+class FinishHandler {
+  constructor(value) {
+    this.value = value;
+  }
+}
+FinishHandler.prototype.chain = c;
+FinishHandler.prototype.map = m;
+const finishHandler = (value) => new FinishHandler(value);
 export const of = (value) => new Of(value);
 
 export const chain = (chainer) => (action) => new Chain(chainer, action);
@@ -66,6 +82,7 @@ export const handler = (handlers) => (program) =>
 const resume = (value) => new Resume(value);
 
 const callback = (callback) => new MultiCallback(callback);
+const singleCallback = (callback) => new SingleCallback(callback);
 const pipe = (a, ...fns) => fns.reduce((res, fn) => fn(res), a);
 
 const findHandlers = (key) => (arr) => (reject) => {
@@ -86,21 +103,13 @@ const findHandlers = (key) => (arr) => (reject) => {
 
 // todo: callback that can return void (single) or return another callback
 class Interpreter {
-  constructor(
-    action,
-    onDone,
-    onError,
-    context = { handlers: [], prev: undefined, resume: undefined, action }
-  ) {
-    context.action = action;
+  constructor(onDone, onError, context) {
     this.context = context;
-    this.context.action = action;
     this.onError = onError;
     this.onDone = onDone;
     this.isPaused = true;
   }
   run() {
-    const self = this;
     this.isPaused = false;
     while (this.context) {
       const action = this.context.action;
@@ -132,27 +141,39 @@ class Interpreter {
           this.return(action.value, context);
           break;
         }
-
+        case SingleCallback: {
+          this.context = undefined;
+          action.callback((value) => {
+            this.return(value, context);
+            if (this.isPaused) {
+              this.run();
+            }
+          });
+          break;
+        }
+        case FinishHandler: {
+          this.return(action.value, context);
+          break;
+        }
         case MultiCallback: {
           this.context = undefined;
           action.callback(
             // exec
-            (execAction) => (then) => {
+            (execAction) => {
               const ctx = {
                 prev: context.prev,
                 resume: context.resume,
                 handlers: context.handlers,
                 action: execAction
               };
-              new Interpreter(execAction, then, this.onError, ctx).run();
+              new Interpreter(this.onDone, this.onError, ctx).run();
             },
             // done
             (value) => {
-              this.return(value, context);
               // this.return(value, context);
-              if (self.isPaused) {
-                this.run();
-              }
+              // if (this.isPaused) {
+              //   this.run();
+              // }
             }
           );
           break;
@@ -200,12 +221,11 @@ class Interpreter {
           const { value } = action;
           const { resume } = context;
           // context of the transformer, context of the program to continue
-          const { transformCtx, programCtx } = resume;
           if (!resume) {
             this.onError(Error("using resume outside of handler"));
             return;
           }
-
+          const { transformCtx, programCtx } = resume;
           // 2. continue the main program with resumeValue,
           // and when it finishes, let it go all the way through the *return* transformation proccess
           // /\ it goes all the way beacue it goes to programCtx.prev (before perform) that will eventuallyfall to transform
@@ -225,17 +245,16 @@ class Interpreter {
     }
     this.isPaused = true;
   }
-  return(value, context) {
-    const prev = context.prev;
+  return(value, currCtx) {
+    const prev = currCtx && currCtx.prev;
     if (prev) {
-      switch (context.prev.action.constructor) {
+      switch (prev.action.constructor) {
         case Handler: {
           const { handlers } = prev.action;
           this.context = {
             resume: prev.resume,
             handlers: prev.handlers,
             prev: prev.prev,
-            nextInstruction: prev.nextInstruction,
             action: handlers.return ? handlers.return(value) : new Of(value)
           };
           break;
@@ -249,6 +268,9 @@ class Interpreter {
           };
           break;
         }
+        default: {
+          this.onError("invalid state");
+        }
       }
     } else {
       this.onDone(value);
@@ -258,7 +280,12 @@ class Interpreter {
 }
 const run = (program) =>
   new Promise((resolve, reject) => {
-    new Interpreter(program, resolve, reject).run();
+    new Interpreter(resolve, reject, {
+      handlers: [],
+      prev: undefined,
+      resume: undefined,
+      action: program
+    }).run();
   });
 
 const effect = () => callback((exec, done) => done());
@@ -323,7 +350,7 @@ const stream = (initials) => {
   };
   return self;
 };
-const str = stream(Array.from({ length: 10 }));
+const str = stream(Array.from({ length: 100000 }));
 const foreachStream = perform("foreachStream");
 const toStream = handler({
   return: (val) => of(stream([val])),
@@ -450,38 +477,47 @@ const test2 = perform("test2");
 const test3 = perform("test3");
 
 const withTest1 = handler({
-  // return(val) {
-  //   return of(val + "f1");
-  // },
+  return: (val) => of(val + "f1"),
   // test1: (value) =>
   //   callback((exec, done) => {
   //     exec(resume(value + "!"))((val) => done("~" + val + "~"));
-  //   })
+  //   }),
   test1: (value) => resume(value + "!").map((val) => "~" + val + "~")
 });
 const withTest2 = handler({
-  // return(val) {
-  //   return of(val + "f2");
-  // },
+  return: (val) => of(val + "f2"),
+  test2: (value) =>
+    callback((exec, done) => {
+      exec(resume(value + "!").chain((val) => finishHandler("+" + val + "+")));
+      // ((val) => done("+" + val + "+"));
+    })
+
   // test2: (value) =>
-  //   callback((exec, done) => {
-  //     exec(resume(value + "!"))((val) => done("+" + val + "+"));
-  //   })
-  test2: (value) => resume(value + "!").map((val) => "^" + val + "^")
+  //   resume(value + "!").chain((val) =>
+  //     singleCallback((done) => {
+  //       done("+" + val + "+");
+  //     })
+  //   )
+  // test2: (value) => resume(value + "!").map((val) => "+" + val + "+")
 });
 const withTest3 = handler({
-  // return(val) {
-  //   return of(val + "f3");
-  // },
+  return: (val) => of(val + "f3"),
+  test3: (value) =>
+    callback((exec, done) => {
+      // exec(resume(value + "!"))((val) => done("(" + val + ")"));
+      exec(resume(value + "!").chain((val) => finishHandler("(" + val + ")")));
+    })
   // test3: (value) =>
-  //   callback((exec, done) => {
-  //     exec(resume(value + "!"))((val) => done("(" + val + ")"));
-  //   })
-  test3: (value) => resume(value + "!").map((val) => "(" + val + ")")
+  //   resume(value + "!").chain((val) =>
+  //     singleCallback((done) => {
+  //       done("(" + val + ")");
+  //     })
+  //   )
+  // test3: (value) => resume(value + "!").map((val) => "(" + val + ")")
 });
 
-const programhandlerscopedtest = test1("hi0").chain((hi1) =>
-  test2("hi2").chain((hi2) => test3("hi3").map((hi3) => hi1 + hi2 + hi3))
+const programhandlerscopedtest = test3("hi0").chain((hi1) =>
+  test2("hi2").chain((hi2) => test1("hi3").map((hi3) => hi1 + hi2 + hi3))
 );
 
 pipe(programhandlerscopedtest, withTest1, withTest2, withTest3, run)
