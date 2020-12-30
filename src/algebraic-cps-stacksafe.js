@@ -96,10 +96,11 @@ const findHandlers = (key) => (context) => (onError) => {
 };
 // todo: callback that can return void (single) or return another callback
 class Interpreter {
-  constructor(onDone, onError, context) {
+  constructor(onDone, onError, context, resume) {
     this.context = context;
     this.onError = onError;
     this.onDone = onDone;
+    this.resume = resume;
     this.isPaused = true;
   }
   run() {
@@ -114,9 +115,7 @@ class Interpreter {
           // switch (nested.type) {
           //   case "of": {
           //     this.context = {
-          //       handlers: context.handlers,
           //       prev: context.prev,
-          //       resume: context.resume,
           //       action: action.chainer(nested.value)
           //     };
           //     break;
@@ -125,7 +124,6 @@ class Interpreter {
           this.context = {
             // handlers: context.handlers,
             prev: context,
-            resume: context.resume,
             action: action.after
           };
           break;
@@ -149,8 +147,7 @@ class Interpreter {
           const { handlers, program } = action;
           const transformCtx = {
             prev: context,
-            action: handlers.return ? program.chain(handlers.return) : program,
-            resume: context.resume
+            action: handlers.return ? program.chain(handlers.return) : program
             // handlers: [
             //   ...context.handlers,
             //   {
@@ -176,12 +173,11 @@ class Interpreter {
             // 1. Make the activated handler returns to the *return transformation* parent,
             // and not to the *return transformation* directly (so it doesn't get transformed)
             prev: transformCtx.prev,
-            action: handlerAction,
-            // handlers: transformCtx.handlers,
-            resume: {
-              transformCtx,
-              programCtx: context
-            }
+            action: handlerAction
+          };
+          this.resume = {
+            transformCtx,
+            programCtx: context
           };
           this.context = activatedHandlerCtx;
           break;
@@ -189,13 +185,12 @@ class Interpreter {
         case Resume: {
           // inside activatedHandlerCtx
           const { value } = action;
-          const { resume } = context;
           // context of the transformer, context of the program to continue
           if (!resume) {
             this.onError(Error("using resume outside of handler"));
             return;
           }
-          const { transformCtx, programCtx } = resume;
+          const { transformCtx, programCtx } = this.resume;
           transformCtx.prev = context.prev;
           this.return(value, programCtx);
           break;
@@ -218,10 +213,7 @@ class Interpreter {
         }
         case Chain: {
           this.context = {
-            // handlers: this.context.handlers,
-            // handlers: prev.handlers,
             prev: prev.prev,
-            resume: prev.resume,
             action: prev.action.chainer(value)
           };
           break;
@@ -350,7 +342,6 @@ const run = (program) =>
       },
       reject,
       {
-        // handlers: [],
         prev: undefined,
         resume: undefined,
         action: pipe(program, withIoPromise, toEither, withIo)
@@ -367,7 +358,6 @@ const handleTest1SecondImpl = handler({
   test1: (val) => resume(10),
   return: (val) => pure([...val, "!"])
 });
-console.log("hi");
 run(
   // handleTest1(pure(10))
   handleTest1(
