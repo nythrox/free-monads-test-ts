@@ -1,7 +1,7 @@
 
 // this doensnt work because: just pausing/resuming means nothing... you literally just did what callback already did;
-// problem w dynamic scope in handlers: when entering a handler, the scope goes -1 so the handler can re-throw effects,
-// but inside the handler if we want to introduce another handler, the scope should be normal and not -1
+
+// now when adding new handlers before `resume`, it doesnt matter because resume returns to programCtx and ignores the handler frame and because of transformCtx.prev = context.prev;
 const {
   makeGeneratorDo,
   makeMultishotGeneratorDo,
@@ -79,20 +79,26 @@ const resume$ = (interpreter) => (value) => {
     interpreter.run();
   }
 };
-const findHandlers = (key) => (array) => (onError) => {
+const findHandlers = (key) => (context) => (onError) => {
   // reverse map
-  for (var i = array.length - 1; i >= 0; i--) {
-    const curr = array[i];
-    if (curr.handlers[key]) {
-      return [curr.handlers[key], curr.context];
+  let curr = context;
+  while (curr) {
+    const action = curr.action;
+    if (curr.action.constructor === Handler) {
+      console.log(curr.action.handlers);
+      const handler = action.handlers[key];
+      if (handler) {
+        console.log("found handler", handler.toString());
+        return [handler, curr];
+      }
     }
+    curr = curr.prev;
   }
   onError(Error("Handler not found: " + key.toString()));
 };
 // todo: callback that can return void (single) or return another callback
 class Interpreter {
   constructor(onDone, onError, context) {
-    console.log("hi");
     this.context = context;
     this.onError = onError;
     this.onDone = onDone;
@@ -103,6 +109,7 @@ class Interpreter {
     while (this.context) {
       const action = this.context.action;
       const context = this.context;
+      console.log(action, context);
       switch (action.constructor) {
         case Chain: {
           // const nested = action.after;
@@ -145,21 +152,21 @@ class Interpreter {
           this.context = {
             prev: context,
             action: program,
-            resume: context.resume,
-            handlers: [
-              ...context.handlers,
-              {
-                handlers,
-                context
-              }
-            ]
+            resume: context.resume
+            // handlers: [
+            //   ...context.handlers,
+            //   {
+            //     handlers,
+            //     context
+            //   }
+            // ]
           };
 
           break;
         }
         case Perform: {
           const { value } = action;
-          const h = findHandlers(action.key)(context.handlers)(this.onError);
+          const h = findHandlers(action.key)(context)(this.onError);
           if (!h) return;
           const [handler, transformCtx] = h;
 
@@ -169,7 +176,7 @@ class Interpreter {
             // and not to the *return transformation* directly (so it doesn't get transformed)
             prev: transformCtx.prev,
             action: handlerAction,
-            handlers: transformCtx.handlers,
+            // handlers: transformCtx.handlers,
             resume: {
               transformCtx,
               programCtx: context
@@ -191,7 +198,8 @@ class Interpreter {
           // 2. continue the main program with resumeValue,
           // and when it finishes, let it go all the way through the *return* transformation proccess
           // /\ it goes all the way beacue it goes to programCtx.prev (before perform) that will eventuallyfall to transform
-          // this.context = programCtx.nextInstruction(value);
+          // programCtx.prev.handlers = context.handlers;
+          // console.log(context.handlers);
           this.return(value, programCtx);
           // this.nextInstruction(value, programCtx);
           // 3. after the transformation is done, return to the person chaining `resume`
@@ -215,7 +223,7 @@ class Interpreter {
           const { handlers } = prev.action;
           this.context = {
             resume: prev.resume,
-            handlers: prev.handlers,
+            // handlers: prev.handlers,
             prev: prev.prev,
             action: handlers.return ? handlers.return(value) : new Of(value)
           };
@@ -223,7 +231,8 @@ class Interpreter {
         }
         case Chain: {
           this.context = {
-            handlers: prev.handlers,
+            // handlers: this.context.handlers,
+            // handlers: prev.handlers,
             prev: prev.prev,
             resume: prev.resume,
             action: prev.action.chainer(value)
@@ -353,14 +362,33 @@ const run = (program) =>
       },
       reject,
       {
-        handlers: [],
+        // handlers: [],
         prev: undefined,
         resume: undefined,
         action: pipe(program, withIoPromise, toEither, withIo)
       }
     ).run();
   });
-run(waitFor(() => Promise.resolve(20)))
+
+const test1 = effect("test1");
+const handleTest1 = handler({
+  test1: (val) => handleTest1SecondImpl(resume(2))
+});
+const handleTest1SecondImpl = handler({
+  test1: (val) => resume(10),
+  return: (val) => pure([...val, "!"])
+});
+
+run(
+  handleTest1(
+    eff(function* () {
+      const first = yield test1();
+      const second = yield test1();
+      const third = yield test1();
+      return [first, second, third];
+    })
+  )
+)
   .then(console.log)
   .catch(console.error);
 module.exports = {
