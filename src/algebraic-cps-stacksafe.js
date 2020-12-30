@@ -2,6 +2,7 @@
 // this doensnt work because: just pausing/resuming means nothing... you literally just did what callback already did;
 
 // now when adding new handlers before `resume`, it doesnt matter because resume returns to programCtx and ignores the handler frame and because of transformCtx.prev = context.prev;
+// big redflag: order of execution and handler context are different. changing the .prev will also change the handlers and that is bad
 const {
   makeGeneratorDo,
   makeMultishotGeneratorDo,
