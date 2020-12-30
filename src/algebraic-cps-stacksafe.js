@@ -1,8 +1,5 @@
 
 // this doensnt work because: just pausing/resuming means nothing... you literally just did what callback already did;
-
-// now when adding new handlers before `resume`, it doesnt matter because resume returns to programCtx and ignores the handler frame and because of transformCtx.prev = context.prev;
-// big redflag: order of execution and handler context are different. changing the .prev will also change the handlers and that is bad
 const {
   makeGeneratorDo,
   makeMultishotGeneratorDo,
@@ -89,8 +86,8 @@ const findHandlers = (key) => (context) => (onError) => {
       console.log(curr.action.handlers);
       const handler = action.handlers[key];
       if (handler) {
-        console.log("found handler", handler.toString());
-        return [handler, curr];
+        console.log("found handler", handler.toString(), curr.transformCtx);
+        return [handler, curr.transformCtx];
       }
     }
     curr = curr.prev;
@@ -126,7 +123,7 @@ class Interpreter {
           //   }
           //   default: {}}
           this.context = {
-            handlers: context.handlers,
+            // handlers: context.handlers,
             prev: context,
             resume: context.resume,
             action: action.after
@@ -150,9 +147,9 @@ class Interpreter {
         }
         case Handler: {
           const { handlers, program } = action;
-          this.context = {
+          const transformCtx = {
             prev: context,
-            action: program,
+            action: handlers.return ? program.chain(handlers.return) : program,
             resume: context.resume
             // handlers: [
             //   ...context.handlers,
@@ -162,6 +159,8 @@ class Interpreter {
             //   }
             // ]
           };
+          context.transformCtx = transformCtx;
+          this.context = transformCtx;
 
           break;
         }
@@ -172,6 +171,7 @@ class Interpreter {
           const [handler, transformCtx] = h;
 
           const handlerAction = handler(value, this);
+
           const activatedHandlerCtx = {
             // 1. Make the activated handler returns to the *return transformation* parent,
             // and not to the *return transformation* directly (so it doesn't get transformed)
@@ -196,16 +196,8 @@ class Interpreter {
             return;
           }
           const { transformCtx, programCtx } = resume;
-          // 2. continue the main program with resumeValue,
-          // and when it finishes, let it go all the way through the *return* transformation proccess
-          // /\ it goes all the way beacue it goes to programCtx.prev (before perform) that will eventuallyfall to transform
-          // programCtx.prev.handlers = context.handlers;
-          // console.log(context.handlers);
-          this.return(value, programCtx);
-          // this.nextInstruction(value, programCtx);
-          // 3. after the transformation is done, return to the person chaining `resume`
-          // /\ when the person chaining resume (activatedHandlerCtx) is done, it will return to the transform's parent
           transformCtx.prev = context.prev;
+          this.return(value, programCtx);
           break;
         }
         default: {
@@ -221,13 +213,7 @@ class Interpreter {
     if (prev) {
       switch (prev.action.constructor) {
         case Handler: {
-          const { handlers } = prev.action;
-          this.context = {
-            resume: prev.resume,
-            // handlers: prev.handlers,
-            prev: prev.prev,
-            action: handlers.return ? handlers.return(value) : new Of(value)
-          };
+          this.return(value, prev);
           break;
         }
         case Chain: {
@@ -242,6 +228,7 @@ class Interpreter {
         }
         default: {
           this.onError("invalid state");
+          return;
         }
       }
     } else {
@@ -373,14 +360,16 @@ const run = (program) =>
 
 const test1 = effect("test1");
 const handleTest1 = handler({
+  return: (val) => pure(["dindonutin", ...val]),
   test1: (val) => handleTest1SecondImpl(resume(2))
 });
 const handleTest1SecondImpl = handler({
   test1: (val) => resume(10),
   return: (val) => pure([...val, "!"])
 });
-
+console.log("hi");
 run(
+  // handleTest1(pure(10))
   handleTest1(
     eff(function* () {
       const first = yield test1();
