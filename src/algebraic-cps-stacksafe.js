@@ -1,10 +1,19 @@
-//todo: make multicallback based on singlecallback, using pause and resume without creating a new itnerpreter
 
+// this doensnt work because: just pausing/resuming means nothing... you literally just did what callback already did;
+// problem w dynamic scope in handlers: when entering a handler, the scope goes -1 so the handler can re-throw effects,
+// but inside the handler if we want to introduce another handler, the scope should be normal and not -1
+const {
+  makeGeneratorDo,
+  makeMultishotGeneratorDo,
+  flow,
+  pipe,
+  id
+} = require("./utils");
 const c = function (chainer) {
   return new Chain(chainer, this);
 };
 const m = function (mapper) {
-  return new Chain((e) => of(mapper(e)), this);
+  return new Chain((e) => pure(mapper(e)), this);
 };
 class Of {
   constructor(value) {
@@ -45,64 +54,45 @@ class Resume {
 Resume.prototype.chain = c;
 Resume.prototype.map = m;
 
-class MultiCallback {
-  constructor(callback) {
-    this.callback = callback;
-  }
-}
-MultiCallback.prototype.chain = c;
-MultiCallback.prototype.map = m;
-class SingleCallback {
-  constructor(callback) {
-    this.callback = callback;
-  }
-}
-SingleCallback.prototype.chain = c;
-SingleCallback.prototype.map = m;
-class FinishHandler {
-  constructor(value) {
-    this.value = value;
-  }
-}
-FinishHandler.prototype.chain = c;
-FinishHandler.prototype.map = m;
-const finishHandler = (value) => new FinishHandler(value);
-export const of = (value) => new Of(value);
+class Break {}
+Break.prototype.chain = c;
+Break.prototype.map = m;
+export const stop = () => new Break();
+const pure = (value) => new Of(value);
 
-export const chain = (chainer) => (action) => new Chain(chainer, action);
+const chain = (chainer) => (action) => new Chain(chainer, action);
 
-export const map = (mapper) => (action) =>
-  new Chain((val) => of(mapper(val)), action);
+const map = (mapper) => (action) =>
+  new Chain((val) => pure(mapper(val)), action);
 
-export const perform = (key) => (value) => new Perform(key, value);
+const effect = (key) => (value) => new Perform(key, value);
 
-export const handler = (handlers) => (program) =>
-  new Handler(handlers, program);
+const perform = (key, value) => new Perform(key, value);
+
+const handler = (handlers) => (program) => new Handler(handlers, program);
 
 const resume = (value) => new Resume(value);
-
-const callback = (callback) => new MultiCallback(callback);
-const singleCallback = (callback) => new SingleCallback(callback);
-const pipe = (a, ...fns) => fns.reduce((res, fn) => fn(res), a);
-
-const findHandlers = (key) => (arr) => (reject) => {
-  let handlers;
-  // reverse map
-  arr.forEach((_, index, array) => {
-    const curr = array[array.length - 1 - index];
-    if (curr.handlers[key]) {
-      handlers = [curr.handlers[key], curr.context];
-    }
-  });
-  if (!handlers) {
-    reject(Error("Handler not found: " + key.toString()));
-    return;
+const resume$ = (interpreter) => (value) => {
+  interpreter.return(value, interpreter.lastStop.context);
+  interpreter.lastStop = undefined;
+  if (interpreter.isPaused) {
+    interpreter.run();
   }
-  return handlers;
+};
+const findHandlers = (key) => (array) => (onError) => {
+  // reverse map
+  for (var i = array.length - 1; i >= 0; i--) {
+    const curr = array[i];
+    if (curr.handlers[key]) {
+      return [curr.handlers[key], curr.context];
+    }
+  }
+  onError(Error("Handler not found: " + key.toString()));
 };
 // todo: callback that can return void (single) or return another callback
 class Interpreter {
   constructor(onDone, onError, context) {
+    console.log("hi");
     this.context = context;
     this.onError = onError;
     this.onDone = onDone;
@@ -113,7 +103,6 @@ class Interpreter {
     while (this.context) {
       const action = this.context.action;
       const context = this.context;
-      // console.log(action);
       switch (action.constructor) {
         case Chain: {
           // const nested = action.after;
@@ -140,55 +129,15 @@ class Interpreter {
           this.return(action.value, context);
           break;
         }
-        case SingleCallback: {
+        case Break: {
+          this.lastStop = { context };
           this.context = undefined;
-          action.callback((value) => {
-            this.return(value, context);
-            if (this.isPaused) {
-              this.run();
-            }
-          });
-          break;
-        }
-        case FinishHandler: {
-          // console.log("stopping", this);
-          this.context = undefined;
-          const { callback, value } = action.value;
-          // console.log("calling", callback.toString(), "with", value);
-          callback(value);
-          // this.done()
-          // this.return(action.value, context);
-          break;
-        }
-        case MultiCallback: {
-          this.context = undefined;
-          action.callback(
-            // exec
-            (execAction) => (then) => {
-              const ctx = {
-                prev: context.prev,
-                resume: context.resume,
-                handlers: context.handlers,
-                action: execAction.chain((n) =>
-                  finishHandler({ callback: then, value: n })
-                )
-              };
-              const i = new Interpreter(this.onDone, this.onError, ctx);
-              i.isClone = true;
-              i.run();
-            },
-            // done
-            (value) => {
-              if (this.isClone && !context.prev) {
-                this.onDone(value);
-              } else {
-                this.return(value, context);
-                if (this.isPaused) {
-                  this.run();
-                }
-              }
-            }
-          );
+          // action.callback((value) => {
+          //   this.return(value, context);
+          //   if (this.isPaused) {
+          //     this.run();
+          //   }
+          // });
           break;
         }
         case Handler: {
@@ -210,11 +159,11 @@ class Interpreter {
         }
         case Perform: {
           const { value } = action;
-          const [handler, transformCtx] = findHandlers(action.key)(
-            context.handlers
-          )(this.onError);
+          const h = findHandlers(action.key)(context.handlers)(this.onError);
+          if (!h) return;
+          const [handler, transformCtx] = h;
 
-          const handlerAction = handler(value);
+          const handlerAction = handler(value, this);
           const activatedHandlerCtx = {
             // 1. Make the activated handler returns to the *return transformation* parent,
             // and not to the *return transformation* directly (so it doesn't get transformed)
@@ -283,7 +232,6 @@ class Interpreter {
         }
         default: {
           this.onError("invalid state");
-          console.log("invalid state!!");
         }
       }
     } else {
@@ -292,342 +240,151 @@ class Interpreter {
     }
   }
 }
-const run = (program) =>
-  new Promise((resolve, reject) => {
-    new Interpreter(resolve, reject, {
-      handlers: [],
-      prev: undefined,
-      resume: undefined,
-      action: program
-    }).run();
-  });
-
-const effect = () => callback((exec, done) => done());
-const promise = () =>
-  new Promise((resolve, reject) => {
-    resolve();
-  });
-
-function eff(n) {
-  if (n < 1) return effect();
-  return effect().chain(() => eff(n - 1));
-}
-function p(n) {
-  if (n < 1) return promise();
-  return promise().then(() => p(n - 1));
-}
-
-async function main() {
-  const promise1 = performance.now();
-  await p(1000000);
-  const promise2 = performance.now();
-  const PromiseTime = promise2 - promise1;
-  const p1 = performance.now();
-  await run(eff(1000000));
-  const p2 = performance.now();
-  const EffTime = p2 - p1;
-  console.log(
-    "eff1:",
-    EffTime,
-    "promise:",
-    PromiseTime,
-    "faster:",
-    EffTime < PromiseTime ? "eff" : "promise"
-  );
-}
-// main();
-const stream = (initials) => {
-  const self = {
-    history: initials ? initials : [],
-    listen: function (callback) {
-      this.history.forEach((item) => callback(item));
-      this.listeners.push(callback);
-    },
-    concat: function (stream) {
-      this.history = [...this.history, ...stream.history];
-      stream.listen((n) => {
-        self.push(n);
-      });
-    },
-    push: function (item) {
-      this.history.push(item);
-      this.listeners.forEach((fn) => fn(item));
-    },
-    listeners: [],
-    disposeFns: [],
-    onDispose: function (fn) {
-      this.disposeFns.push(fn);
-    },
-    dispose: function () {
-      this.disposeFns.forEach((fn) => fn());
-    }
-  };
-  return self;
-};
-const str = stream(Array.from({ length: 10 }));
-const foreachStream = perform("foreachStream");
-const toStream = handler({
-  return: (val) => of(stream([val])),
-  foreachStream: (str) =>
-    callback((exec, done) => {
-      const newStream = stream();
-      str.listen((value) => {
-        exec(resume(value))((stream2) => {
-          stream2.listen((n) => {
-            newStream.push(n);
-          });
-        });
-      });
-      str.onDispose(() => {
-        newStream.dispose();
-      });
-      done(newStream);
-    })
-});
-const strprogram = toStream(foreachStream(str).map((n) => 2));
-
-// run(strprogram).then((stream) => {
-//   const arr = [];
-//   stream.listen((e) => arr.push(e));
-//   console.log(arr);
-// });
-
-Promise.prototype.await = function () {
-  return waitFor(this);
-};
-
-const wait = (seconds) =>
-  callback((exec, done) => {
-    setTimeout(done, seconds);
-  });
-const waitFor = perform("promise");
-
-const withPromise = handler({
-  return: (x) => of(x),
-  promise: (promise) =>
-    callback((exec, done) => promise.then(done)).chain(resume)
-});
-
-const toArray = handler({
-  return: (val) => of([val]),
-  foreach: (array) => {
-    return callback((exec, done) => {
-      let newArray = [];
-      for (const item of array) {
-        exec(resume(item))((res) => {
-          for (const item of res) {
-            newArray.push(item);
-          }
-        });
-      }
-      done(newArray);
-    });
-    // const nextInstr = (newArr = []) => {
-    //   // const [first, ...rest] = arr;
-    //   if (array.length === 0) {
-    //     return of(newArr);
-    //   } else {
-    //     const first = array.shift();
-    //     return (
-    //       resume(first)
-    //         //.map(a => [...newArr, ...a])
-    //         .chain((a) => {
-    //           for (const item of a) {
-    //             newArr.push(item);
-    //           }
-    //           return nextInstr(newArr);
-    //         })
-    //     );
-    //   }
-    // };
-    return nextInstr(array);
+const io = effect("io");
+const withIo = handler({
+  return: (value) => pure(() => value),
+  io(thunk) {
+    const value = thunk();
+    return resume(value);
   }
 });
 
-const foreach = perform("foreach");
-const arr = Array.from({ length: 10000 });
-const arrProgram = toArray(foreach(arr).map(() => 1));
-// run(arrProgram).then(console.log).catch(console.error);
-
-// main();
-const repeat = (times, interval) =>
-  callback((exec, resume) => {
-    let int = 1;
-    const id = setInterval(() => {
-      if (int === times) {
-        clearInterval(id);
-      } else {
-        resume();
-        int++;
-      }
-    }, interval);
-  });
-
-const withHi = handler({
-  hi: () => wait(20).chain(() => resume(500).map((n) => "num: " + n))
-});
-const withHiMulti = handler({
-  hi: (value) =>
-    callback((exec, done) => {
-      exec(resume(value))((o1) => {
-        exec(resume(value + 1))((o2) => {
-          done([...o1, ...o2]);
-        });
-      });
-    })
-  // wait(20).chain(() => resume(500).map((n) => "num: " + n))
-});
-const hi = perform("hi");
-const program = withHiMulti(
-  hi(1)
-    .map((n) => n * 2)
-    .chain((num) => hi(10).map((n) => [num, n]))
-);
-
-// run(program).then(console.log).catch(console.error);
-
-const test1 = perform("test1");
-const test2 = perform("test2");
-const test3 = perform("test3");
-
-const withTest1 = handler({
-  return: (val) => of(val + "f1"),
-  // test1: (value) =>
-  //   callback((exec, done) => {
-  //     exec(resume(value + "!"))((val) => done("~" + val + "~"));
-  //   }),
-  test1: (value) => resume(value + "!").map((val) => "~" + val + "~")
-});
-const withTest2 = handler({
-  return: (val) => of(val + "f2"),
-  test2: (value) =>
-    callback((exec, done) => {
-      exec(resume(value + "!"))((val) => done("+" + val + "+"));
-      // .chain((val) => finishHandler("+" + val + "+")));
-    })
-
-  // test2: (value) =>
-  //   resume(value + "!").chain((val) =>
-  //     singleCallback((done) => {
-  //       done("+" + val + "+");
-  //     })
-  //   )
-  // test2: (value) => resume(value + "!").map((val) => "+" + val + "+")
-});
-const withTest3 = handler({
-  return: (val) => of(val + "f3"),
-  test3: (value) =>
-    callback((exec, done) => {
-      exec(resume(value + "!"))((val) => done("(" + val + ")"));
-      // exec(
-      //   resume(value + "!")
-      //     // owo
-      //     .chain((val) => finishHandler("(" + val + ")"))
-      //   // owo
-      // );
-    })
-  // test3: (value) =>
-  //   resume(value + "!").chain((val) =>
-  //     singleCallback((done) => {
-  //       done("(" + val + ")");
-  //     })
-  //   )
-  // test3: (value) => resume(value + "!").map((val) => "(" + val + ")")
-});
-
-const programhandlerscopedtest = test3("hi0").chain((hi1) =>
-  test2("hi2").chain((hi2) => test1("hi3").map((hi3) => hi1 + hi2 + hi3))
-);
-
-export const makeMultishotGeneratorDo = (of) => (chain) => (generatorFun) => {
-  function run(history) {
-    const it = generatorFun();
-    let state = it.next();
-    history.forEach((val) => {
-      state = it.next(val);
-    });
-    if (state.done) {
-      return of(state.value);
-    }
-    return chain((val) => {
-      return run([...history, val]);
-    })(state.value);
-  }
-  return run([]);
-};
-
-export const Effect = {
+const Effect = {
   map,
   chain,
-  of,
-  do: makeMultishotGeneratorDo(of)(chain)
+  of: pure,
+  single: makeGeneratorDo(pure)(chain),
+  do: makeMultishotGeneratorDo(pure)(chain)
 };
+const eff = Effect.single;
+const forEach = effect("forEach");
 
-// pipe(programhandlerscopedtest, withTest1, withTest2, withTest3, run)
-//   .then(console.log)
-//   .catch(console.error);
-const io = perform("io");
-const awaitt = perform("async");
-const raise = perform("error");
-
-const withIo = handler({
-  return: (val) => callback((exec, done) => done(() => val)),
-  io: (io) =>
-    callback((exec, done) => {
-      exec(resume(io()))(done);
-    })
+const withForEach = handler({
+  return: (val) => pure([val]),
+  forEach: (array) => {
+    const nextInstr = (newArr = []) => {
+      if (array.length === 0) {
+        return pure(newArr);
+      } else {
+        const first = array.shift();
+        return resume(first).chain((a) => {
+          for (const item of a) {
+            newArr.push(item);
+          }
+          return nextInstr(newArr);
+        });
+      }
+    };
+    return nextInstr();
+  }
 });
 
+const raise = effect("error");
+const handleError = (handleError) =>
+  handler({
+    error: (exn) => handleError(exn)
+  });
 const toEither = handler({
-  return: (val) =>
-    callback((exec, done) => done({ type: "right", value: val })),
-  error: (err) => callback((exec, done) => done({ type: "left", error: err }))
+  return: (value) =>
+    pure({
+      type: "right",
+      value
+    }),
+  error: (exn) =>
+    pure({
+      type: "left",
+      value: exn
+    })
 });
+const waitFor = effect("async");
 
-const withAsyncIo = handler({
-  return: (value) => callback((exec, done) => done(Promise.resolve(value))),
-  async: (iopromise) =>
-    callback((exec, done) => {
-      exec(io(iopromise))((promise) => {
-        promise
-          .then((res) => {
-            exec(resume(res))(done);
-          })
-          .catch((err) => {
-            exec(raise(err))();
-          });
-      });
+const withIoPromise = handler({
+  return: (value) => pure(Promise.resolve(value)),
+  async: (iopromise, interpreter) =>
+    io(iopromise).chain((promise) => {
+      console.log("hello");
+      promise.then(resume$(interpreter));
+      return stop();
     })
-});
-const env = perform("env");
-const withEnv = handler({
-  env: () =>
-    Effect.do(function* () {
-      const res = yield resume("jason");
-      const res2 = yield resume("nosaj");
-      return [res, res2];
-    })
-  // callback((exec, done) => {
-  //   exec(resume("jason"))((res) => {
-  //     exec(resume("nosaj"))((res2) => {
-  //       done([res, res2]);
+
+  // .chain((promise) =>
+
+  //   // callback((_, done, execInProgramScope) => {
+  //   //   promise.then(done);
+  //   //   promise.catch((err) => {
+  //   //     execInProgramScope(raise(err))(done);
+  //   //   });
+  //   }).chain(resume)
+
+  // .chain((promise) =>
+  //   singleCallback((done) => {
+  //     promise.then((value) =>
+  //       done({
+  //         success: true,
+  //         value
+  //       })
+  //     );
+  //     promise.catch((error) => {
+  //       done({
+  //         success: false,
+  //         error
+  //       });
   //     });
-  //   });
+  //   })
+  // )
+  // .chain((res) => {
+  //   if (res.success) {
+  //     return resume(res.value);
+  //   } else {
+  //     return raise(res.error);
+  //   }
   // })
 });
-
-const powpow = Effect.do(function* () {
-  const name = yield env();
-  const something = yield awaitt(() => Promise.resolve(10));
-  const something2 = yield awaitt(() => Promise.resolve("err"));
-  const something3 = yield awaitt(() => Promise.resolve(10));
-  return name + something + something2 + something3;
-});
-// pipe(powpow, withEnv, withAsyncIo, toEither, withIo, run).then((io) => {
-//   const p = io();
-//   if (p.type === "left") {
-//     console.error(p);
-//   } else {
-//     p.value.then(console.log);
-//   }
-// });
+const run = (program) =>
+  new Promise((resolve, reject) => {
+    new Interpreter(
+      (thunk) => {
+        const either = thunk();
+        if (either.type === "right") {
+          resolve(either.value);
+        } else {
+          reject(either.value);
+        }
+      },
+      reject,
+      {
+        handlers: [],
+        prev: undefined,
+        resume: undefined,
+        action: pipe(program, withIoPromise, toEither, withIo)
+      }
+    ).run();
+  });
+run(waitFor(() => Promise.resolve(20)))
+  .then(console.log)
+  .catch(console.error);
+module.exports = {
+  flow,
+  pipe,
+  id,
+  withForEach,
+  eff,
+  forEach,
+  run,
+  io,
+  withIo,
+  Interpreter,
+  chain,
+  pure,
+  map,
+  handler,
+  resume,
+  perform,
+  effect,
+  Effect,
+  toEither,
+  waitFor,
+  withIoPromise,
+  raise,
+  handleError
+};
